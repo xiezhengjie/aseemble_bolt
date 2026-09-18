@@ -1,0 +1,154 @@
+<mujoco model="ur5e_assemble">
+  <include file="ur5e.xml" />
+  <include file="d435i.xml" />
+  <include file="camera_mount.xml" />
+  <include file="fastener.xml" />
+  <include file="robotiq_ft_sensor.xml" />
+
+  <compiler angle="radian" meshdir="../assets/meshes" fitaabb="true" autolimits="true" />
+
+
+  <worldbody>
+    <!-- <light pos="0 0 1.5" dir="0 0 -1" directional="true" /> -->
+
+    <!-- body定义：以ur5e作为基础-->
+    <body name="base" quat="1 0 0 0" childclass="ur5e">
+      <inertial mass="4.0" pos="0 0 0" diaginertia="0.00443333156 0.00443333156 0.0072" />
+      <site name="imu" size="0.01" pos="0 0 0" />
+      <geom mesh="base_0" class="ur5e_visual" pos="0 0 0" quat="-1 0 0 0"/>
+      <geom mesh="base_1"  class="ur5e_collision" pos="0 0 0" quat="-1 0 0 0"/>
+      <body name="shoulder_link" pos="0 0 0.1625" quat="0 0 0 1">
+        <inertial mass="3.761" pos="0 -0.00193 -0.02561" quat="0.560239 0.250606 -0.316559 0.72327" diaginertia="0.00703079 0.0070003 0.00602478" />
+        <joint name="shoulder_pan_joint" class="size3"/>
+        <geom mesh="shoulder_0" class="ur5e_visual" quat="0 0 0 1"/>
+        <geom mesh="shoulder_1" class="ur5e_collision" quat="0 0 0 1"/>
+        <body name="upper_arm_link" quat="0.707107 0.707107 0 0">
+          <inertial mass="8.058" pos="-0.2125 0 0.11336" quat="0.500275 0.499641 0.500368 0.499716" diaginertia="0.333881 0.332472 0.0150588" />
+          <joint name="shoulder_lift_joint" class="size3"/>
+          <geom mesh="upperarm_0" class="ur5e_visual" pos="0 0 0.138" quat="0.5 0.5 -0.5 -0.5"/>
+          <geom mesh="upperarm_1" class="ur5e_collision" pos="0 0 0.138" quat="0.5 0.5 -0.5 -0.5"/>
+          <body name="forearm_link" pos="-0.425 0 0">
+            <inertial mass="2.846" pos="-0.2422 0 0.0265" quat="0.501301 0.498381 0.510711 0.489375" diaginertia="0.0787927 0.0785102 0.00397103" />
+            <joint name="elbow_joint" class="size3_limited"/>
+            <geom mesh="forearm_0" class="ur5e_visual" pos="0 0 0.007" quat="0.5 0.5 -0.5 -0.5"/>
+            <geom mesh="forearm_1" class="ur5e_collision" pos="0 0 0.007" quat="0.5 0.5 -0.5 -0.5"/>
+            <body name="wrist_1_link" pos="-0.3922 0 0.1333">
+              <inertial mass="1.37" pos="0 -0.01634 -0.0018" quat="0.960609 0.277707 0.00515042 -0.00913626" diaginertia="0.00165502 0.00142363 0.00119868" />
+              <joint name="wrist_1_joint" class="size1"/>
+              <geom mesh="wrist1_0" class="ur5e_visual" pos="0 0 -0.127" quat="0.707107 0.707107 0 0"/>
+              <geom mesh="wrist1_1" class="ur5e_collision" pos="0 0 -0.127" quat="0.707107 0.707107 0 0"/>
+              <body name="wrist_2_link" pos="0 -0.0997 -2.04488e-11" quat="0.707107 0.707107 0 0">
+                <inertial mass="1.3" pos="0 0.01634 -0.0018" quat="0.996652 -0.0779336 -0.00684629 -0.0237381" diaginertia="0.00135637 0.00128607 0.00095814" />
+                <joint name="wrist_2_joint" class="size1"/>
+                <geom mesh="wrist2_0" class="ur5e_visual" pos="0 0 -0.0997" quat="1 0 0 0"/>
+                <geom mesh="wrist2_1" class="ur5e_collision" pos="0 0 -0.0997" quat="1 0 0 0"/>
+                <body name="wrist_3_link" pos="0 0.0996 -2.04283e-11" quat="0.707107 -0.707107 0 0">
+                  <inertial mass="1.55708" pos="0.00672317 -0.040597 -0.0280331" quat="0.927089 -0.365553 0.0178321 -0.0809876" diaginertia="0.00923821 0.00743104 0.00471673" />
+                  <joint name="wrist_3_joint" class="size1" />
+                  <geom mesh="wrist3_0" class="ur5e_visual" pos="0 0 -0.0989" quat="0.707107 0.707107 0 0"/>
+                  <geom mesh="wrist3_1" class="ur5e_collision" pos="0 0 -0.0989" quat="0.707107 0.707107 0 0"/>
+                  <site name="attachment_site" pos="0 0 0" quat="1 0 0 0" />
+
+                  <!-- robotiq_ft300s_定义 -->
+                  <body name="robotiq_ft300s" childclass="robotiq_ft300s" pos="0 0 0.0375" quat="1 0 0 0">
+                    <inertial mass="0.41" pos="-0.006 0 -0.024" euler="0 0 0"
+                      diaginertia="0.0002413 0.0005215 0.0006562" />
+                    <geom mesh="robotiq_ft300s_0"
+                      material="Black_Metal" class="robotiq_ft300s_visual" />
+                    <geom
+                      class="robotiq_ft300s_collision" mesh="robotiq_ft300s_1" />
+                    
+                    <body name="tcp_link" childclass="fastener" pos="0 0 0.064" euler="0 0 0">
+                      <site name="force_torque" pos="0 0 -0.064" /> 
+                      <inertial mass="0.59687" pos="1.2485E-16 1.2441E-16 -0.050763" euler="0 0 0"
+                                diaginertia="0.0004488 0.0004488 0.00045541"/>
+                      <geom mesh="fastener_link" material=" Warm_Gray" class="fastener_visual" />
+                      <geom class="fastener_collision" mesh="bottom_0" pos="0 0 -0.06" />
+                      <geom class="fastener_collision" mesh="bottom_1" pos="0 0 -0.04" />
+                      <geom class="fastener_collision" mesh="top_0" pos="0 0 0" />
+                      <geom class="fastener_collision" mesh="top_1" pos="0 0 0" />
+                      <geom class="fastener_collision" mesh="top_2" pos="0 0 0" />
+                      <geom class="fastener_collision" mesh="top_3" pos="0 0 0" />
+                      <geom class="fastener_collision" mesh="top_4" pos="0 0 0" />
+                      <geom class="fastener_collision" mesh="top_5" pos="0 0 0" />
+
+                      <!-- 末端工具site -->
+                      <site name="tcp_site" pos="0 0 0" quat="1 0 0 0" size="0.01" rgba="1 0 0 0" />
+                    </body>
+                  </body>
+
+                  <!-- camera_mount 定义-->
+                  <body name="camera_mount" childclass="camera_mount" pos="0 0 -0.01" quat="1 0 0 0">
+                    <inertial mass="0.11321" pos="-1.2669E-16 -0.017303 -0.00064577" euler="0 0 0"
+                      diaginertia="3.466E-05 8.5068E-05 0.00011889" />
+                    <geom mesh="mount_link" material="Silver_Gray" class="camera_mount_visual" />
+                    <geom class="camera_mount_collision" mesh="mount_link" />
+
+                    <!-- d435i 定义 -->
+                    <body name="d435i" childclass="d435i" pos="0 -0.05999 0.025" quat="0 0 0 1">
+                      <geom mesh="d435i_0" material="IR_Lens" class="d435i_visual" />
+                      <geom mesh="d435i_1" material="IR_Emitter_Lens" class="d435i_visual" />
+                      <geom mesh="d435i_2" material="IR_Rim" class="d435i_visual" />
+                      <geom mesh="d435i_3" material="IR_Lens" class="d435i_visual" />
+                      <geom mesh="d435i_4" material="Cameras_Gray" class="d435i_visual" />
+                      <geom mesh="d435i_5" material="Black_Acrylic" class="d435i_visual" />
+                      <geom mesh="d435i_6" material="Black_Acrylic" class="d435i_visual" />
+                      <geom mesh="d435i_7" material="RGB_Pupil" class="d435i_visual" />
+                      <geom mesh="d435i_8" mass="0.072" material="Metal_Casing" class="d435i_visual" />
+                      <geom class="d435i_collision" mesh="d435i_8" />
+
+                      <!-- d435i的相机传感器定义 -->
+                       <camera name="d435i_camera" mode="fixed"  pos="0 0 -0.006"  xyaxes="1 0 0 0 -1 0" fovy="58"/>
+                    </body>
+                  </body>
+                </body>
+              </body>
+            </body>
+          </body>
+        </body>
+      </body>
+    </body>
+  </worldbody>
+
+  <!-- 碰撞排除：相邻/固定连接的 link 之间不会真实碰撞 -->
+  <contact>
+    <!-- UR5e 主链 -->
+    <exclude body1="base" body2="shoulder_link" />
+    <exclude body1="shoulder_link" body2="upper_arm_link" />
+    <exclude body1="upper_arm_link" body2="forearm_link" />
+    <exclude body1="forearm_link" body2="wrist_1_link" />
+    <exclude body1="wrist_1_link" body2="wrist_2_link" />
+    <exclude body1="wrist_2_link" body2="wrist_3_link" />
+    <!-- 末端附件 -->
+    <exclude body1="wrist_3_link" body2="robotiq_ft300s" />
+    <exclude body1="robotiq_ft300s" body2="tcp_link" />
+    <exclude body1="wrist_3_link" body2="camera_mount" />
+    <exclude body1="camera_mount" body2="d435i" />
+  </contact>
+
+  <sensor>
+    <force name="force" site="force_torque" noise="0.01" />
+    <torque name="torque" site="force_torque" noise="0.001" />
+    <!-- <actuatorpos name="shoulder_pan_joint_p" actuator="shoulder_pan_joint" />
+    <actuatorvel name="shoulder_pan_joint_v" actuator="shoulder_pan_joint" />
+    <actuatorfrc name="shoulder_pan_joint_f" actuator="shoulder_pan_joint" noise="0.001" />
+    <actuatorpos name="shoulder_lift_joint_p" actuator="shoulder_lift_joint" />
+    <actuatorvel name="shoulder_lift_joint_v" actuator="shoulder_lift_joint" />
+    <actuatorfrc name="shoulder_lift_joint_f" actuator="shoulder_lift_joint" noise="0.001" />
+    <actuatorpos name="elbow_joint_p" actuator="elbow_joint" />
+    <actuatorvel name="elbow_joint_v" actuator="elbow_joint" />
+    <actuatorfrc name="elbow_joint_f" actuator="elbow_joint" noise="0.001" />
+    <actuatorpos name="wrist_1_joint_p" actuator="wrist_1_joint" />
+    <actuatorvel name="wrist_1_joint_v" actuator="wrist_1_joint" />
+    <actuatorfrc name="wrist_1_joint_f" actuator="wrist_1_joint" noise="0.001" />
+    <actuatorpos name="wrist_2_joint_p" actuator="wrist_2_joint" />
+    <actuatorvel name="wrist_2_joint_v" actuator="wrist_2_joint" />
+    <actuatorfrc name="wrist_2_joint_f" actuator="wrist_2_joint" noise="0.001" />
+    <actuatorpos name="wrist_3_joint_p" actuator="wrist_3_joint" />
+    <actuatorvel name="wrist_3_joint_v" actuator="wrist_3_joint" />
+    <actuatorfrc name="wrist_3_joint_f" actuator="wrist_3_joint" noise="0.001" />
+    <framequat name="orientation" objtype="site" noise="0.001" objname="imu" />
+    <gyro name="angular-velocity" site="imu" noise="0.005" cutoff="34.9" /> -->
+  </sensor>
+
+</mujoco>

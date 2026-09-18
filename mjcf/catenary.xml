@@ -1,0 +1,54 @@
+<mujoco model="catenary">
+
+
+    <default>
+        <default class="catenary">
+            <material specular="0.7" shininess="1.5" />
+            <default class="catenary_visual">
+                <geom group="2" type="mesh" contype="0" conaffinity="0" mass="0" material="Steel_LightRoughness"/>
+            </default>
+            <default class="double_ear_sleeve_visual">
+                <geom group="2" type="mesh" contype="0" conaffinity="0" mass="0" material="Steel_MiddleRoughness"/>
+            </default>
+            <default class="catenary_collision">
+                <!-- <geom group="3" type="mesh" mass="0" friction="0.5 0.1 0.001" solref="0.002 1" solimp="0.9 0.99 0.001" margin="0.0001"/> -->
+                <!-- <geom group="3" type="mesh" mass="0" friction="1 0.5 0.5" solref="0.02 0.5" solimp="0.6 0.8 0.1" margin="0.0001"/> -->
+                <geom  group="3" type="mesh" mass="0" friction="0.6 0.05 0.001" solref="0.01 1" solimp="0.9 0.99 0.001" margin="0.0001"/>
+            </default>
+        </default>
+    </default>
+
+    <asset>
+        <mesh file="catenary/double_ear_sleeve_1_split_0.STL" />
+        <mesh file="catenary/double_ear_sleeve_1_split_1.STL" />
+        <mesh file="catenary/double_ear_sleeve_1_split_2.STL" />
+        <mesh file="catenary/double_ear_sleeve_2_split_0.STL" />
+        <mesh file="catenary/double_ear_sleeve_2_split_1.STL" />
+        <mesh file="catenary/double_ear_sleeve_2_split_2.STL" />
+        <mesh file="catenary/head_bolts_1.STL" /> 
+        <mesh file="catenary/head_bolts_2.STL" />
+
+        <mesh file="catenary/hex_bolts_1.STL" />  
+        <mesh file="catenary/hex_bolts_2.STL" />
+        <mesh file="catenary/hex_bolts_3.STL" />  
+        
+        <mesh file="catenary/hex_nuts_1.STL" />  
+        <mesh file="catenary/hex_nuts_2.STL" />
+        <mesh file="catenary/hex_nuts_3.STL" />  
+
+        <mesh file="catenary/plain_washers_1.STL" />  
+        <mesh file="catenary/plain_washers_2.STL" />
+        <mesh file="catenary/plain_washers_3.STL" />  
+        <mesh file="catenary/plain_washers_4.STL" />
+        
+        <mesh file="catenary/prevailing_torque_1.STL" />  
+        <mesh file="catenary/prevailing_torque_2.STL" />
+
+        <texture type="2d" name="Steel_LightRoughness" file="../assets/textures/Steel_LightRoughness.png" />
+        <texture type="2d" name="Steel_MiddleRoughness" file="../assets/textures/Steel_MiddleRoughness.png" />
+
+        <material name="Steel_LightRoughness" texture="Steel_LightRoughness" />
+        <material name="Steel_MiddleRoughness" texture="Steel_MiddleRoughness" />
+
+    </asset>
+</mujoco>

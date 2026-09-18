@@ -1,0 +1,21 @@
+<mujoco model="robotiq_ft300s">
+
+  <default>
+    <default class="robotiq_ft300s">
+      <material specular="0.7" shininess="1.5"/>
+      <default class="robotiq_ft300s_visual">
+        <geom group="2" type="mesh" contype="0" conaffinity="0" mass="0"/>
+      </default>
+      <default class="robotiq_ft300s_collision">
+        <geom group="3" type="mesh" mass="0"/>
+      </default>
+    </default>
+  </default>
+
+  <asset>
+    <material class="robotiq_ft300s" name="Black_Metal" rgba="0.0941176 0.0901961 0.0745098 1"/>
+
+    <mesh file="robotiq_ft_sensor/robotiq_ft300s_0.STL"/> <!-- visual -->
+    <mesh file="robotiq_ft_sensor/robotiq_ft300s_1.STL"/> <!-- collision -->
+  </asset>
+</mujoco>

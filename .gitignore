@@ -1,0 +1,30 @@
+# ─────────── 训练产物（一定不要进 git）───────────
+logs/
+models/
+runs/
+*.tfevents.*
+MUJOCO_LOG.TXT
+debug.log
+
+# ─────────── 数据（体积大、可重新采集）───────────
+# 默认忽略。若想把专家数据纳入版本管理（约 18M），
+# 注释掉下面这行，并考虑改用 Git LFS。
+datasets/
+
+# ─────────── Python ───────────
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+.ipynb_checkpoints/
+
+# ─────────── 编辑器 / 系统 ───────────
+.vscode/
+.idea/
+.DS_Store
+
+# ─────────── 3D 资产（约 87M）───────────
+# MuJoCo 运行必需，建议保留在仓库中；
+# 若嫌大请改用 Git LFS，或改为在 README 里说明获取方式。
+# assets/

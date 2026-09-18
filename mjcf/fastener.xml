@@ -1,0 +1,31 @@
+<mujoco model="fastener">
+  
+  <default>
+    <default class="fastener">
+      <material specular="0.5" shininess="0.6"/>
+      <default class="fastener_visual">
+        <geom group="2" type="mesh" contype="0" conaffinity="0" mass="0"/>
+      </default>
+      <default class="fastener_collision">
+        <!-- <geom group="3" type="mesh" mass="0" conaffinity="1"  friction="0.5 0.1 0.001" solref="0.002 1" solimp="0.9 0.99 0.001" margin="0.0001"/> -->
+        <geom group="3" type="mesh" mass="0" conaffinity="1" friction="1 1 1"  solref="0.01 1"  solimp="0.9 0.99 0.001"  margin="0"/>
+      </default>
+    </default>
+  </default>
+
+  <asset>
+    <!-- fastener_link 半透明材质：alpha=0.35，便于遥操作观察螺栓装配过程 -->
+    <material class="fastener" name=" Warm_Gray" rgba="0.5490196 0.5254902 0.5254902 0.35"/>
+
+    <mesh file="fastener/fastener_link.STL"/>
+    <mesh file="fastener/bottom_0.STL"/>
+    <mesh file="fastener/bottom_1.STL"/>
+    <mesh file="fastener/top_0.STL"/>
+    <mesh file="fastener/top_1.STL"/>
+    <mesh file="fastener/top_2.STL"/>
+    <mesh file="fastener/top_3.STL"/>
+    <mesh file="fastener/top_4.STL"/>
+    <mesh file="fastener/top_5.STL"/>
+  </asset>
+
+</mujoco>
