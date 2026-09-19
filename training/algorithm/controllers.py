@@ -178,7 +178,7 @@ class UR5eController:
                  eef_body_id=None, 
                  eef_site_id=None,
                  force_sensor_site_id=None,
-                 mass=1.0, gravity=np.array([0, 0, -9.8]),
+                 mass=1.0, gravity=np.array([0, 0, -9.81]),
                  cutoff_freq=30, force_tr=0, torque_tr=0,
                  # 导纳死区
                  force_deadzone=0.2, torque_deadzone=0.01,
@@ -317,11 +317,11 @@ class UR5eController:
         bid = self.eef_body_id
         mj.mj_objectAcceleration(m, d, mj.mjtObj.mjOBJ_BODY, bid, self._acc6, 0)
         alpha_w = self._acc6[:3]
-        # MuJoCo cacc 是固有加速度（含 −g，静止时读 +9.81），须加回重力得坐标加速度
-        a_org_w = self._acc6[3:] + m.opt.gravity
         omega_w = d.cvel[bid][:3]                       # 世界系角速度
-        r_w = d.xipos[bid] - d.xpos[bid]                # body 原点 → CoM
-        a_com = a_org_w + _cross(alpha_w, r_w) + _cross(omega_w, _cross(omega_w, r_w))
+        v_com_w = d.cvel[bid][3:]                       # 世界系质心线速度
+        # cacc 是质心系空间加速度，不是质心经典加速度；加回重力并补 ω×v_com。
+        # 旧实现再做一次 α×r + ω×(ω×r) 搬运算会重复计入该修正。
+        a_com = self._acc6[3:] + m.opt.gravity + _cross(omega_w, v_com_w)
         F_w = m.body_mass[bid] * a_com
         R_b = d.ximat[bid].reshape(3, 3)                # 惯性系姿态
         I_c = R_b @ np.diag(m.body_inertia[bid]) @ R_b.T

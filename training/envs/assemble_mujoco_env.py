@@ -114,8 +114,8 @@ class AssembleMuJoCoEnv(Env):
         seat_lateral_coef=0.05,
 
         # --- 动作缩放 ---
-        pos_action_scale=0.0015,  # 每次最大移动1.5mm（均匀分配到10次导纳循环，每次0.15mm）
-        ori_action_scale=0.01, # 每次最大旋转0.01 rad， 即1.8度
+        pos_action_scale=0.002,  # 每次最大移动2mm（均匀分配到10次导纳循环，每次0.2mm）
+        ori_action_scale=0.02, # 每次最大旋转0.02 rad， 即3.6度
 
         # --- 力控开关 ---
         is_use_force_control=True,

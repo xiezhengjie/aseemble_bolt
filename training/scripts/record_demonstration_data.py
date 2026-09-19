@@ -46,12 +46,12 @@ class DataRecorder:
                         np.random.uniform(-0.001, 0.001),   # Y: ±3mm
                         np.random.uniform(-0.003, 0.003),   # Z: ±3mm 
                         np.random.uniform(-5, 5),           # yaw: ±5°
-                        np.random.uniform(-0.002, 0.002),        # X: ±0mm
-                        np.random.uniform(-0.002, 0.002),        # Y: ±0mm
-                        np.random.uniform(-0.002, 0.002),        # Z: ±0mm 
+                        np.random.uniform(-0.001, 0.001),        # X: ±0mm
+                        np.random.uniform(-0.001, 0.001),        # Y: ±0mm
+                        np.random.uniform(-0.001, 0.001),        # Z: ±0mm 
                         np.random.uniform(-10, 10),         # Roll: ±10°
                         np.random.uniform(-10, 10),         # Pitch: ±10°
-                        np.random.uniform(-15, 15)             # Yaw: ±15°
+                        np.random.uniform(-10, 10)             # Yaw: ±15°
                     ])
         self.filter = LowPassFilter(cutoff_freq=5, dt=0.1)
 
@@ -108,18 +108,6 @@ class DataRecorder:
             self.is_recording = True
 
     def reset_toggle(self):
-        self.random_delta = np.array([
-            np.random.uniform(-0.001, 0.001),   # X: ±3mm
-            np.random.uniform(-0.001, 0.001),   # Y: ±3mm
-            np.random.uniform(-0.003, 0.003),   # Z: ±3mm 
-            np.random.uniform(-5, 5),           # yaw: ±5°
-            np.random.uniform(-0.00, 0.00),        # X: ±0mm
-            np.random.uniform(-0.00, 0.00),        # Y: ±0mm
-            np.random.uniform(-0.00, 0.00),        # Z: ±0mm 
-            np.random.uniform(-10, 10),         # Roll: ±10°
-            np.random.uniform(-10, 10),         # Pitch: ±10°
-            np.random.uniform(0, 0)             # Yaw: ±0°
-        ])
         # self.random_delta = np.array([
         #         np.random.uniform(-0.001, 0.001),   # X: ±3mm
         #         np.random.uniform(-0.001, 0.001),   # Y: ±3mm
@@ -132,6 +120,30 @@ class DataRecorder:
         #         np.random.uniform(-15, 15),         # Pitch: ±15°
         #         np.random.uniform(-30, 30)             # Yaw: ±0°
         #     ])
+        self.random_delta = np.array([
+                np.random.uniform(-0.001, 0.001),   # X: ±3mm
+                np.random.uniform(-0.001, 0.001),   # Y: ±3mm
+                np.random.uniform(-0.003, 0.003),   # Z: ±3mm 
+                np.random.uniform(-5, 5),           # yaw: ±5°
+                np.random.uniform(-0.001, 0.001),        # X: ±0mm
+                np.random.uniform(-0.001, 0.001),        # Y: ±0mm
+                np.random.uniform(-0.001, 0.001),        # Z: ±0mm 
+                np.random.uniform(-10, 10),         # Roll: ±10°
+                np.random.uniform(-10, 10),         # Pitch: ±10°
+                np.random.uniform(-10, 10)             # Yaw: ±15°
+            ])
+        # self.random_delta = np.array([
+        #     np.random.uniform(-0.001, 0.001),   # X: ±3mm
+        #     np.random.uniform(-0.001, 0.001),   # Y: ±3mm
+        #     np.random.uniform(-0.003, 0.003),   # Z: ±3mm 
+        #     np.random.uniform(-5, 5),           # yaw: ±5°
+        #     np.random.uniform(-0.00, 0.00),        # X: ±0mm
+        #     np.random.uniform(-0.00, 0.00),        # Y: ±0mm
+        #     np.random.uniform(-0.00, 0.00),        # Z: ±0mm 
+        #     np.random.uniform(-10, 10),         # Roll: ±10°
+        #     np.random.uniform(-10, 10),         # Pitch: ±10°
+        #     np.random.uniform(0, 0)             # Yaw: ±0°
+        # ])
         self.logger.info(("="*7)+"随机重置已更新"+("="*7))
         
     def joystick_control(self):
@@ -218,7 +230,9 @@ class DataRecorder:
                 obs, reward, terminated, truncated, info = self.env.step(action)
                 if self.is_recording:
                     self.logger.info(f"记录动作: {action}, 当前步数: {self.env.current_step}, 深度: {info['depth']}, 状态: {info['state']}, \
-                                     力: {info['force']}, 力矩: {info['torque']}, 位置误差xy: {info['position_error_xy']}, 偏角: {info['angle_z']}, yaw误差: {info['yaw_error']}")
+                                     力: {info['force']}, 力矩: {info['torque']}, 位置误差xy: {info['position_error_xy']}, \
+                                     导纳偏移: {info['admittance_dx']}mm, 偏角: {info['angle_z']}, yaw误差: {info['yaw_error']}")
+                    
                     self.record_buffer[-1][0].append(observation)
                     self.record_buffer[-1][1].append(action)
                     self.record_buffer[-1][2].append(terminated or truncated)
@@ -249,23 +263,31 @@ class DataRecorder:
                             self.record_buffer.append([[],[],[]])
                             self.logger.info(f"当前装配任务完成，完成录制第{len(self.record_buffer)-1}条录制，最终yaw={final_yaw_deg:.1f}°，输出信息为：{info}")
         elif self.ctrl_mode == 1: 
-            action = np.concatenate([delta_pos / (self.move_mode + 1), delta_euler / (self.move_mode + 1)])
-            obs, reward, terminated, truncated, info = self.env.step(action)
-            # 每 5 步输出一次期望/实际位姿（每步都打会明显拖慢循环）
-            self._free_log_ctr += 1
-            if self._free_log_ctr % 5 == 0:
-                ctrl = self.env.ur5e_controller
-                actual_pos = self.env.data.site_xpos[self.env.eef_site_id].copy()
-                actual_euler = np.degrees(rotmat_to_euler(
-                    self.env.data.site_xmat[self.env.eef_site_id].reshape(3, 3)))
-                des_euler = np.degrees(quat_to_euler(self.env.last_quat))
-                self.logger.info(
-                    f"期望: pos={np.round(self.env.last_pos, 4)}, euler(deg)={np.round(des_euler, 2)} | "
-                    f"实际: pos={np.round(actual_pos, 4)}, euler(deg)={np.round(actual_euler, 2)} | "
-                    f"位置误差: {np.linalg.norm(self.env.last_pos - actual_pos) * 1000:.2f}mm | "
-                    f"|F|: {np.linalg.norm(ctrl.calibrated_ft[:3]):.2f}N "
-                    f"导纳偏移: {np.linalg.norm(ctrl.admittance_dx) * 1000:.2f}mm")
-                self.logger.info(f"action_pos={action[:3]}, action_rot={action[3:]}")
+            raw_action = np.concatenate([delta_pos / (self.move_mode + 1),
+                                                     delta_euler / (self.move_mode + 1)])
+            if np.allclose(raw_action, self.action_zero, rtol=0, atol=1e-6):
+                self.filter.reset()
+                action = self.action_zero
+            else:
+                action = self.filter.filter(raw_action)
+                
+            if not np.allclose(self.action_zero, action, rtol=0, atol=self.TOLERANCE):
+                obs, reward, terminated, truncated, info = self.env.step(action)
+                # 每 5 步输出一次期望/实际位姿（每步都打会明显拖慢循环）
+                self._free_log_ctr += 1
+                if self._free_log_ctr % 5 == 0:
+                    ctrl = self.env.ur5e_controller
+                    actual_pos = self.env.data.site_xpos[self.env.eef_site_id].copy()
+                    actual_euler = np.degrees(rotmat_to_euler(
+                        self.env.data.site_xmat[self.env.eef_site_id].reshape(3, 3)))
+                    des_euler = np.degrees(quat_to_euler(self.env.last_quat))
+                    self.logger.info(
+                        f"期望: pos={np.round(self.env.last_pos, 4)}, euler(deg)={np.round(des_euler, 2)} | "
+                        f"实际: pos={np.round(actual_pos, 4)}, euler(deg)={np.round(actual_euler, 2)} | "
+                        f"位置误差: {np.linalg.norm(self.env.last_pos - actual_pos) * 1000:.2f}mm | "
+                        f"|F|: {np.linalg.norm(ctrl.calibrated_ft[:3]):.2f}N "
+                        f"导纳偏移: {np.linalg.norm(ctrl.admittance_dx) * 1000:.2f}mm")
+                    self.logger.info(f"action_pos={action[:3]}, action_rot={action[3:]}")
         
         return self.joystick.get_button(8) # Start 键退出
 
