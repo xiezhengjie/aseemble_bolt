@@ -10,6 +10,37 @@ from algorithm.ur5e_ik import UR5eIK
 from algorithm.force_calibration import ForceCalibrationSim
 import multiprocessing as mp
 
+def _cross(a, b):
+    """np.cross 的快速替代（np.cross 的 Python 封装开销 ~80µs，热路径不可接受）"""
+    return np.array([a[1]*b[2] - a[2]*b[1],
+                     a[2]*b[0] - a[0]*b[2],
+                     a[0]*b[1] - a[1]*b[0]])
+
+def _quat_to_rotmat_fast(q):
+    """[w,x,y,z] 四元数直接转旋转矩阵（替代 scipy Rotation，~57µs → ~3µs）"""
+    w, x, y, z = q
+    n = w*w + x*x + y*y + z*z
+    s = 2.0 / n if n > 0.0 else 0.0
+    xx, yy, zz = x*x*s, y*y*s, z*z*s
+    xy, xz, yz = x*y*s, x*z*s, y*z*s
+    wx, wy, wz = w*x*s, w*y*s, w*z*s
+    return np.array([
+        [1.0 - (yy + zz), xy - wz, xz + wy],
+        [xy + wz, 1.0 - (xx + zz), yz - wx],
+        [xz - wy, yz + wx, 1.0 - (xx + yy)],
+    ])
+
+def _rotmat_to_rotvec_fast(Re):
+    """旋转矩阵转旋转向量（替代 scipy from_matrix().as_rotvec()，~415µs → ~10µs）。
+    仅用于误差旋转（|θ| 远小于 π），θ→0 时取一阶近似。"""
+    ax = np.array([Re[2, 1] - Re[1, 2], Re[0, 2] - Re[2, 0], Re[1, 0] - Re[0, 1]])
+    cos = (Re[0, 0] + Re[1, 1] + Re[2, 2] - 1.0) * 0.5
+    cos = min(1.0, max(-1.0, cos))
+    angle = np.arccos(cos)
+    if angle < 1e-8:
+        return 0.5 * ax
+    return (angle / (2.0 * np.sin(angle))) * ax
+
 class AdmittanceController:
     """导纳控制器：m·ẍ + b·ẋ + k·x = f_net（半隐式欧拉积分），速度先行。"""
 
@@ -497,6 +528,12 @@ class UR5eController:
         self._jacp = np.zeros((3, model.nv))
         self._jacr = np.zeros((3, model.nv))
         self._M = np.zeros((model.nv, model.nv))
+        self._J = np.zeros((6, arm_dof))
+        self._eye6 = np.eye(6)
+        self._eye_arm = np.eye(arm_dof)
+        # OSC 阻尼项预计算（kd = 2ζ√kp，ζ 运行时不变）
+        self.osc_kd_pos = 2 * self.osc_damping_ratio * np.sqrt(self.osc_kp_pos)
+        self.osc_kd_ori = 2 * self.osc_damping_ratio * np.sqrt(self.osc_kp_ori)
 
         # 轨迹生成器
         self.trajectory_generator = TrajectoryGenerator(n_dof=arm_dof, end_vel='secant', alpha=0.5, v_max=vel_limit)
@@ -569,15 +606,15 @@ class UR5eController:
         a_org_w = self._acc6[3:] + m.opt.gravity
         omega_w = d.cvel[bid][:3]                       # 世界系角速度
         r_w = d.xipos[bid] - d.xpos[bid]                # body 原点 → CoM
-        a_com = a_org_w + np.cross(alpha_w, r_w) + np.cross(omega_w, np.cross(omega_w, r_w))
+        a_com = a_org_w + _cross(alpha_w, r_w) + _cross(omega_w, _cross(omega_w, r_w))
         F_w = m.body_mass[bid] * a_com
         R_b = d.ximat[bid].reshape(3, 3)                # 惯性系姿态
         I_c = R_b @ np.diag(m.body_inertia[bid]) @ R_b.T
-        L_dot = I_c @ alpha_w + np.cross(omega_w, I_c @ omega_w)
+        L_dot = I_c @ alpha_w + _cross(omega_w, I_c @ omega_w)
 
         R_ws = d.site_xmat[self.eef_site_id].reshape(3, 3)   # 与 read_calibrate_force 同一坐标系（tcp）
         F_s = R_ws.T @ F_w
-        T_s = R_ws.T @ L_dot + np.cross(P_stm, F_s)
+        T_s = R_ws.T @ L_dot + _cross(P_stm, F_s)
         return np.concatenate([F_s, T_s])
 
     def reset_max_force_tracking(self):
@@ -657,12 +694,13 @@ class UR5eController:
     # ============================================================
     def _osc_tau(self, pos_t, quat_t, vel_ff=None):
         """计算 OSC 力矩：τ = JᵀΛẍ_des + Nᵀτ₀ + qfrc_bias；vel_ff 为目标任务空间速度前馈"""
-        from scipy.spatial.transform import Rotation as _R
         m, d, n = self.model, self.data, self.arm_dof
 
         mj.mj_jacSite(m, d, self._jacp, self._jacr, self.eef_site_id)
-        J = np.vstack([self._jacp[:, :n], self._jacr[:, :n]])       # 6×n
-        mj.mj_fullM(m, d, self._M)
+        J = self._J
+        J[:3] = self._jacp[:, :n]
+        J[3:] = self._jacr[:, :n]
+        mj.mj_fullM(m, self._M, d.qM)
         M = self._M[:n, :n]
 
         q = d.qpos[:n]
@@ -672,19 +710,20 @@ class UR5eController:
 
         # 任务空间位姿误差（姿态误差用旋转矢量，世界系）
         e_pos = pos_t - x_pos
-        R_t = quat_to_rotmat(quat_t)
-        e_ori = _R.from_matrix(R_t @ R_cur.T).as_rotvec()
+        R_t = _quat_to_rotmat_fast(quat_t)
+        e_ori = _rotmat_to_rotvec_fast(R_t @ R_cur.T)
 
         # 任务空间速度（含前馈：阻尼作用在速度误差上，消除跟踪滞后）
         dx = J @ qd
         v_des = np.zeros(6) if vel_ff is None else np.asarray(vel_ff, float)
         # 接触门控：接触时前馈阻尼项会变成持续推力（kd·v_des），必须撤除
-        if np.linalg.norm(self.calibrated_ft[:3]) > 2.0:
+        f = self.calibrated_ft
+        if np.sqrt(f[0]*f[0] + f[1]*f[1] + f[2]*f[2]) > 2.0:
             v_des = np.zeros(6)
-        zeta = self.osc_damping_ratio
-        ddx_pos = self.osc_kp_pos * e_pos + 2 * zeta * np.sqrt(self.osc_kp_pos) * (v_des[:3] - dx[:3])
-        ddx_ori = self.osc_kp_ori * e_ori + 2 * zeta * np.sqrt(self.osc_kp_ori) * (v_des[3:] - dx[3:])
-        na, nb = np.linalg.norm(ddx_pos), np.linalg.norm(ddx_ori)
+        ddx_pos = self.osc_kp_pos * e_pos + self.osc_kd_pos * (v_des[:3] - dx[:3])
+        ddx_ori = self.osc_kp_ori * e_ori + self.osc_kd_ori * (v_des[3:] - dx[3:])
+        na = np.sqrt(ddx_pos @ ddx_pos)
+        nb = np.sqrt(ddx_ori @ ddx_ori)
         if na > self.osc_max_pos_acc:
             ddx_pos *= self.osc_max_pos_acc / na
         if nb > self.osc_max_ori_acc:
@@ -693,12 +732,15 @@ class UR5eController:
 
         # 动力学一致伪逆：J̄ = M⁻¹JᵀΛ，Λ = (J M⁻¹ Jᵀ + λ²I)⁻¹
         MinvJt = np.linalg.solve(M, J.T)
-        Lambda = np.linalg.inv(J @ MinvJt + (self.osc_lambda_damping ** 2) * np.eye(6))
+        Lambda = np.linalg.inv(J @ MinvJt + (self.osc_lambda_damping ** 2) * self._eye6)
         Jbar = MinvJt @ Lambda
 
         # 笛卡尔反馈力限幅（OSC 标准做法）：冲击/卡阻时自动软化
         F_fb = Lambda @ ddx_des
-        nf, nt = np.linalg.norm(F_fb[:3]), np.linalg.norm(F_fb[3:])
+        f3 = F_fb[:3]
+        t3 = F_fb[3:]
+        nf = np.sqrt(f3 @ f3)
+        nt = np.sqrt(t3 @ t3)
         if nf > self.osc_max_force_fb:
             F_fb[:3] *= self.osc_max_force_fb / nf
         if nt > self.osc_max_torque_fb:
@@ -706,22 +748,31 @@ class UR5eController:
         tau_task = J.T @ F_fb
         # 零空间姿态稳定（拉向 home，阻尼关节速度）
         tau0 = self.osc_null_kp * (self.osc_q_home - q) - self.osc_null_kd * qd
-        N = np.eye(n) - Jbar @ J
+        N = self._eye_arm - Jbar @ J
         tau = tau_task + N.T @ tau0 + d.qfrc_bias[:n]
 
         return np.clip(tau, -self.tau_limit, self.tau_limit)
 
+    @staticmethod
+    def _quat_slerp(q0, q1, s):
+        """两四元数球面插值（替代 scipy Slerp，热路径每次策略步调用 10 次）"""
+        dot = q0 @ q1
+        if dot < 0.0:
+            q1 = -q1
+            dot = -dot
+        if dot > 0.9995:                     # 近重合：线性插值 + 归一化
+            r = q0 + s * (q1 - q0)
+            return r / np.sqrt(r @ r)
+        th = np.arccos(min(1.0, dot))
+        s_th = np.sin(th)
+        return (np.sin((1.0 - s) * th) / s_th) * q0 + (np.sin(s * th) / s_th) * q1
+
     def update_osc(self, dst_pos, dst_quat, admittance_ratio=10, admittance_sub_steps=10):
         """OSC 移动到目标位姿：笛卡尔斜坡 + 导纳偏移 + 每 1ms 力矩控制"""
-        from scipy.spatial.transform import Rotation as _R, Slerp as _Slerp
         dt = self.model.opt.timestep * admittance_sub_steps
-        ts = self.model.opt.timestep
 
         start_pos = self.data.site_xpos[self.eef_site_id].copy()
         start_quat = rotmat_to_quat(self.data.site_xmat[self.eef_site_id].reshape(3, 3))
-        key_times = [0.0, 1.0]
-        slerp = _Slerp(key_times, _R.from_quat(
-            np.roll(np.stack([start_quat, dst_quat]), -1, axis=1)))  # scipy 要 xyzw
         T_total = admittance_ratio * dt
         vel_ff = np.zeros(6)
         vel_ff[:3] = (dst_pos - start_pos) / T_total               # 斜坡线速度前馈
@@ -732,7 +783,7 @@ class UR5eController:
 
             s = k / admittance_ratio
             pos_t = start_pos + (dst_pos - start_pos) * s + dx
-            quat_ramp = np.roll(slerp([s]).as_quat()[0], 1)          # 回 wxyz
+            quat_ramp = self._quat_slerp(start_quat, dst_quat, s)
             quat_t = quat_multiply(dq, quat_ramp)
 
             for _ in range(admittance_sub_steps):

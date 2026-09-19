@@ -6,6 +6,7 @@ import logging
 import numpy as np
 import time
 from utils import rl_utils
+from utils.math_utils import rotmat_to_euler, quat_to_euler
 from algorithm.filter import LowPassFilter
 from envs.assemble_mujoco_env import AssembleMuJoCoEnv
 
@@ -26,6 +27,7 @@ class DataRecorder:
         self.action_zero = np.zeros(6)
         self.move_mode = 0 # 0-快速,缩放1 1-中速,缩放2 2-慢速,缩放3
         self.ctrl_mode = 0 # 0-手柄完全控制 1-自由控制
+        self._free_log_ctr = 0
         # self.random_delta = np.array([
         #             np.random.uniform(-0.001, 0.001),   # X: ±3mm
         #             np.random.uniform(-0.001, 0.001),   # Y: ±3mm
@@ -240,6 +242,20 @@ class DataRecorder:
                                 self.logger.info(f"当前装配任务完成，完成录制第{len(self.record_buffer)-1}条录制，最终yaw={final_yaw_deg:.1f}°，输出信息为：{info}")
         elif self.ctrl_mode == 1: 
             obs, reward, terminated, truncated, info = self.env.step(action)
+            # 每 5 步输出一次期望/实际位姿（每步都打会明显拖慢循环）
+            self._free_log_ctr += 1
+            if self._free_log_ctr % 5 == 0:
+                ctrl = self.env.ur5e_controller
+                actual_pos = self.env.data.site_xpos[self.env.eef_site_id].copy()
+                actual_euler = np.degrees(rotmat_to_euler(
+                    self.env.data.site_xmat[self.env.eef_site_id].reshape(3, 3)))
+                des_euler = np.degrees(quat_to_euler(self.env.last_quat))
+                self.logger.info(
+                    f"期望: pos={np.round(self.env.last_pos, 4)}, euler(deg)={np.round(des_euler, 2)} | "
+                    f"实际: pos={np.round(actual_pos, 4)}, euler(deg)={np.round(actual_euler, 2)} | "
+                    f"位置误差: {np.linalg.norm(self.env.last_pos - actual_pos) * 1000:.2f}mm | "
+                    f"|F|: {np.linalg.norm(ctrl.calibrated_ft[:3]):.2f}N "
+                    f"导纳偏移: {np.linalg.norm(ctrl.admittance_dx) * 1000:.2f}mm")
         
         return self.joystick.get_button(8) # Start 键退出
 

@@ -1,5 +1,12 @@
 import numpy as np
 from algorithm.filter import LowPassFilter
+
+def _cross(a, b):
+    """np.cross 的快速替代（np.cross 的 Python 封装开销 ~80µs，热路径不可接受）"""
+    return np.array([a[1]*b[2] - a[2]*b[1],
+                     a[2]*b[0] - a[0]*b[2],
+                     a[0]*b[1] - a[1]*b[0]])
+
 class ForceCalibrationSim:
     def __init__(self,
                  data,
@@ -30,8 +37,8 @@ class ForceCalibrationSim:
         f_s = -f_ext[:3] - tool_gs + f_in
         f_t = R_ts @ f_s
         
-        t_s = -f_ext[3:] - np.cross(P_stm, tool_gs) + t_in
-        t_t = R_ts @ t_s + np.cross(P_ts, f_t)
+        t_s = -f_ext[3:] - _cross(P_stm, tool_gs) + t_in
+        t_t = R_ts @ t_s + _cross(P_ts, f_t)
 
         # 以工具坐标系表示力和力矩
         force = f_t  
