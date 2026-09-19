@@ -2,7 +2,7 @@
   <include file="ur5e_assemble.xml" />
   <include file="catenary.xml" />
 
-  <option integrator="implicitfast" iterations="100" timestep="0.001" gravity="0 0 -9.81" density="1.225" viscosity="1.8e-5" solver="Newton" noslip_iterations="3"/>
+  <option integrator="implicitfast" iterations="30" timestep="0.001" gravity="0 0 -9.81" density="1.225" viscosity="1.8e-5" solver="Newton" noslip_iterations="3"/>
 
   <statistic center="0.3 0 0.4" extent="0.8" />
 

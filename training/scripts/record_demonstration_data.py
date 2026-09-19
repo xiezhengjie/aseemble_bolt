@@ -1,6 +1,7 @@
 import os
 import sys
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+import gc
 import pygame
 import logging
 import numpy as np
@@ -52,7 +53,7 @@ class DataRecorder:
                         np.random.uniform(-10, 10),         # Pitch: ±10°
                         np.random.uniform(-15, 15)             # Yaw: ±15°
                     ])
-        self.filter = LowPassFilter(cutoff_freq=40, dt=0.1)
+        self.filter = LowPassFilter(cutoff_freq=5, dt=0.1)
 
         
         # 创建AssembleMuJoCoEnv环境（录制始终存单帧，训练时 FrameStack 再叠）
@@ -92,6 +93,10 @@ class DataRecorder:
         else:
             self.logger.error("未检测到手柄")
             exit()
+
+        # 初始化和首次 reset 完成后冻结长期对象，避免录制热路径扫描旧对象图
+        gc.collect()
+        gc.freeze()
 
     def record_toggle(self):
         if self.is_recording:
@@ -261,12 +266,21 @@ class DataRecorder:
 
 
     def recode_run(self):
+        step_wall = self.env.force_ctrl_steps * self.env.model.opt.timestep
+        t_next = time.perf_counter()
         try:
             while True:
                 if self.joystick_control(): 
                     self.logger.info("录制中断。") 
                     self.record_buffer[-1] = [[],[],[]] # 录制中断时，丢弃当前条数据
                     break
+
+                t_next += step_wall
+                delay = t_next - time.perf_counter()
+                if delay > 0:
+                    time.sleep(delay)
+                else:
+                    t_next = time.perf_counter()
         except KeyboardInterrupt:
             if self.is_recording:
                 self.logger.info("录制中断。") 
