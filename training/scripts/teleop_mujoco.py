@@ -16,7 +16,7 @@ from utils.math_utils import *
 
 class TeleopMujocoKeyboard:
     """UR5e键盘遥操作，控制末端位置平移
-    重构后：轨迹生成、力校准、导纳、CTC均封装在UR5eController中
+    力校准、导纳、OSC 均封装在 UR5eController 中
     """
 
     def __init__(
@@ -24,17 +24,10 @@ class TeleopMujocoKeyboard:
         xml_path=str(PROJECT_ROOT / "mjcf" / "ur5e_assemble_sence.xml"),
         urdf_path=str(PROJECT_ROOT / "urdf" / "ur5e_assemble.urdf"),
         pos_action_scale=0.004,       # 每次按键移动距离 4mm
-        use_interp=True,             # 是否使用min-jerk插值
-        use_ruckig=False,            # 是否使用Ruckig在线轨迹生成
-        ruckig_max_vel=np.array([3.14]*6),
-        ruckig_max_acc=np.array([2.0]*6),
-        ruckig_max_jerk=np.array([10.0]*6),
         is_use_force_control=True,
         # --- 频率分离参数（与assemble_mujoco_env一致）---
         force_ctrl_steps=80,         # 每次按键总仿真步数（80ms@1ms）
         admittance_ratio=10,         # 导纳频率/策略频率 = 10
-        traj_settle_steps=1,         # 每段子轨迹的稳定步数
-        traj_max_vel=3.14,           # 轨迹最大速度
         verbose=True
     ):
         # MuJoCo模型加载
@@ -44,17 +37,10 @@ class TeleopMujocoKeyboard:
 
         # 参数配置
         self.pos_action_scale = pos_action_scale
-        self.use_interp = use_interp
-        self.use_ruckig = use_ruckig
-        self.ruckig_max_vel = ruckig_max_vel
-        self.ruckig_max_acc = ruckig_max_acc
-        self.ruckig_max_jerk = ruckig_max_jerk
 
         # 频率分离参数
         self.force_ctrl_steps = force_ctrl_steps
         self.admittance_ratio = admittance_ratio
-        self.traj_settle_steps = traj_settle_steps
-        self.traj_max_vel = traj_max_vel
         self.admittance_sub_steps = max(2, force_ctrl_steps // admittance_ratio)  # 80//10=8
 
         # 末端site/body ID
@@ -62,25 +48,17 @@ class TeleopMujocoKeyboard:
         self.eef_site_id = self.model.site('tcp_site').id
         self.force_sensor_site_id = self.model.site('force_torque').id
 
-        # 创建UR5eController（整合力校准+导纳+CTC+轨迹生成）
+        # 创建UR5eController（力校准+导纳+OSC）
         self.ur5e_controller = UR5eController(
             model=self.model,
             data=self.data,
             urdf_filename=urdf_path,
-            # PID参数（双环模式备用，CTC模式下不使用）
-            pos_p=np.array([1089.95, 1932.81, 1325.82, 1511.64, 1847.83, 2541.47]),
-            pos_d=np.array([12.85, 10.82, 2.94, 11.20, 12.64, 3.98]),
-            pos_v=np.array([2.85, 1.09, 1.65, 3.65, 2.45, 0.60]),
-            vel_p=np.array([120.61, 87.18, 253.61, 213.44, 177.70, 69.36]),
-            vel_i=np.array([31.29, 28.37, 7.17, 14.57, 36.27, 34.93]),
             # 导纳参数
             m=1, j=0.05, k_t=2000, k_r=10,
+            zeta_t=2.2, zeta_r=1.2, b_t=None, b_r=None,
             arm_dof=6,
             f_0=np.zeros(6),
             is_use_force_control=is_use_force_control,
-            # CTC内环参数
-            ctc_kp=np.array([400.0]*6),
-            ctc_kd=np.array([40.0]*6),
             # 力校准参数
             eef_body_id=self.eef_body_id,
             force_sensor_site_id=self.force_sensor_site_id,
@@ -114,7 +92,6 @@ class TeleopMujocoKeyboard:
             print("=" * 60)
             print(f"每次移动步长: {pos_action_scale*1000:.1f} mm")
             print(f"力控模式: {'启用' if is_use_force_control else '禁用'}")
-            print(f"轨迹模式: {'Ruckig' if use_ruckig else 'min-jerk分段' if use_interp else '阶跃'}")
             print(f"频率分离: 策略1次/按键 = 导纳{admittance_ratio}次 (sub_steps={self.admittance_sub_steps})")
 
     def _reset(self):
@@ -156,40 +133,18 @@ class TeleopMujocoKeyboard:
 
         start_time = time.perf_counter()
 
-        if self.use_ruckig:
-            self.ur5e_controller.move_to_pose(
-                dest_pos, dest_quat, traj_mode='ruckig',
-                max_vel=self.ruckig_max_vel[0],
-            )
-        elif self.use_interp:
-            # 分段插值：将总位移分为admittance_ratio段，每段一个短轨迹
-            for i in range(1, self.admittance_ratio + 1):
-                alpha = i / self.admittance_ratio
-                interp_pos = start_pos + (dest_pos - start_pos) * alpha
-                interp_quat = start_quat + (dest_quat - start_quat) * alpha
-                qnorm = np.linalg.norm(interp_quat)
-                if qnorm > 1e-8:
-                    interp_quat /= qnorm
-                else:
-                    interp_quat = start_quat.copy()
-                if interp_quat[0] < 0:
-                    interp_quat = -interp_quat
-
-                self.ur5e_controller.move_to_pose(
-                    interp_pos, interp_quat, traj_mode='min_jerk',
-                    max_vel=self.traj_max_vel,
-                    settle_steps=self.traj_settle_steps,
-                    max_steps=self.admittance_sub_steps,
-                )
-        else:
-            self.ur5e_controller.update(dest_pos, dest_quat, max_steps=1000)
+        self.ur5e_controller.update(
+            dest_pos, dest_quat,
+            admittance_ratio=self.admittance_ratio,
+            admittance_sub_steps=self.admittance_sub_steps,
+        )
 
         delta_time = time.perf_counter() - start_time
 
         # 打印信息
         new_pos, _ = self.get_current_eef_pose()
-        cal_f = self.ur5e_controller.last_calibrated_force
-        adm_dx = self.ur5e_controller.last_admittance_dx
+        cal_f = self.ur5e_controller.calibrated_ft
+        adm_dx = self.ur5e_controller.admittance_dx
         move_dist = np.linalg.norm(new_pos - start_pos) * 1000
         print(f"Command: [{dx:+.0f}, {dy:+.0f}, {dz:+.0f}]  "
               f"Target: {dest_pos.round(4)}  Actual: {new_pos.round(4)}  "

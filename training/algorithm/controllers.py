@@ -1,14 +1,11 @@
 import os
 import sys
-import copy
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import numpy as np
 import mujoco as mj
-import matplotlib.pyplot as plt
 from utils.math_utils import *
 from algorithm.ur5e_ik import UR5eIK
 from algorithm.force_calibration import ForceCalibrationSim
-import multiprocessing as mp
 
 def _cross(a, b):
     """np.cross 的快速替代（np.cross 的 Python 封装开销 ~80µs，热路径不可接受）"""
@@ -169,279 +166,14 @@ class AdmittanceController:
     def force(self, f0):
         self.f0[:] = np.asarray(f0, float)
 
-class IncrementalPID:
-    """增量式 PID：Δu = Kp·Δe + Ki·e·dt + Kd·Δ²e/dt。"""
-
-    def __init__(self, kp, ki, kd, dim=6, delta_limit=None):
-        self.kp = MathUtils._as_vec(kp, dim)
-        self.ki = MathUtils._as_vec(ki, dim)
-        self.kd = MathUtils._as_vec(kd, dim)
-        self.dim = dim
-        self.delta_limit = None if delta_limit is None else MathUtils._as_vec(delta_limit, dim)
-        self.setpoint = np.zeros(dim)
-        self._prev = None          # [e(k-1), e(k-2)]，None 表示未初始化
-
-    def __call__(self, measurement, dt):
-        e = self.setpoint - np.asarray(measurement, np.float64)
-        if self._prev is None:
-            self._prev = np.stack([e, e])       # e(-1)=e(-2)=e(0) → Δe=Δ²e=0
-        d1 = e - self._prev[0]
-        d2 = e - 2.0 * self._prev[0] + self._prev[1]
-        delta = self.kp * d1 + self.ki * e * dt + self.kd * d2 / dt
-        if self.delta_limit is not None:
-            delta = np.clip(delta, -self.delta_limit, self.delta_limit)
-        self._prev[1] = self._prev[0]
-        self._prev[0] = e
-        return delta
-
-    def reset(self):
-        """只清历史；setpoint 保持不变，调用方按需重设。"""
-        self._prev = None
-
-class PID:
-    """
-        位置式 PID，支持比例/微分先行、积分限幅与输出限幅。
-        P-on-measurement 首拍初始化为 -Kp·y，消除比例偏置。
-    """
-    def __init__(self, kp, ki, kd, output_limit=None, dim=6,
-                 proportional_on_measurement=False,
-                 differential_on_measurement=False,
-                 int_limit=None):
-        self.kp = MathUtils._as_vec(kp, dim)
-        self.ki = MathUtils._as_vec(ki, dim)
-        self.kd = MathUtils._as_vec(kd, dim)
-        self.dim = dim
-        self.output_limit = None if output_limit is None else MathUtils._as_vec(output_limit, dim)
-        self.int_limit = (MathUtils._as_vec(int_limit, dim) if int_limit is not None
-                          else (self.output_limit * 0.8 if self.output_limit is not None else None))
-        self.proportional_on_measurement = proportional_on_measurement
-        self.differential_on_measurement = differential_on_measurement
-        self.setpoint = np.zeros(dim)
-        self._proportional = np.zeros(dim)
-        self._integral = np.zeros(dim)
-        self._e_prev = None
-        self._input_prev = None
-
-    def __call__(self, measurement, dt):
-        y = np.asarray(measurement, np.float64)
-        e = self.setpoint - y
-
-        if self._input_prev is None:            # 首拍：微分置零
-            d_input = np.zeros(self.dim)
-            d_error = np.zeros(self.dim)
-            if self.proportional_on_measurement:
-                self._proportional = -self.kp * y
-        else:
-            d_input = y - self._input_prev
-            d_error = e - self._e_prev
-
-        # 比例项
-        if self.proportional_on_measurement:
-            self._proportional -= self.kp * d_input
-        else:
-            self._proportional = self.kp * e
-
-        # 积分项(限幅)
-        self._integral += self.ki * e * dt
-        if self.int_limit is not None:
-            self._integral = np.clip(self._integral, -self.int_limit, self.int_limit)
-        derivative = (-self.kd * d_input / dt if self.differential_on_measurement
-                      else self.kd * d_error / dt)
-        
-        # 输出项(限幅)
-        output = self._proportional + self._integral + derivative
-        if self.output_limit is not None:
-            output = np.clip(output, -self.output_limit, self.output_limit)
-        self._e_prev = e
-        self._input_prev = y
-        return output
-
-    def reset(self):
-        """只清动态状态；setpoint 保持不变，调用方按需重设。"""
-        self._proportional = np.zeros(self.dim)
-        self._integral = np.zeros(self.dim)
-        self._e_prev = None
-        self._input_prev = None
-
-class CTCController:
-    """
-        计算力矩控制：τ = qfrc_bias + M(q)·qdd_ref，qdd_ref = qdd_des + Kp·e_p + Kd·e_v。
-        kd=None 时取临界阻尼 kd=2√kp；每次调用推进 1 步 mj_step。
-    """
-    def __init__(self, model, data, kp, kd=None, tau_limit=None, arm_dof=6, damping_comp=True):
-        self.model, self.data, self.arm_dof = model, data, arm_dof
-        self.kp = MathUtils._as_vec(kp, arm_dof)
-        self.kd = MathUtils._as_vec(2 * np.sqrt(self.kp) if kd is None else kd, arm_dof)
-        self.tau_limit = None if tau_limit is None else MathUtils._as_vec(tau_limit, arm_dof)
-        # 抵消 MuJoCo 被动阻尼 -d·qd；不补偿则置零
-        self.dof_damping = model.dof_damping[:arm_dof].copy() if damping_comp else np.zeros(arm_dof)
-        self._buf_in = np.zeros(model.nv)    # mj_mulM 要求 nv 维输入/输出
-        self._buf_out = np.zeros(model.nv)
-        self.last_ctrl_torque = np.zeros(arm_dof)
-
-    def __call__(self, q_des, qd_des=None, qdd_des=None):
-        q, qd = self.data.qpos[:self.arm_dof], self.data.qvel[:self.arm_dof]
-        qd_des = np.zeros(self.arm_dof) if qd_des is None else qd_des
-        qdd_des = np.zeros(self.arm_dof) if qdd_des is None else qdd_des
-
-        # 参考加速度 = 前馈 + 误差反馈
-        qdd_ref = qdd_des + self.kp * (np.asarray(q_des) - q) + self.kd * (np.asarray(qd_des) - qd)
-
-        # τ = 重力/科氏偏置 + 惯量项 + 阻尼补偿
-        self._buf_in[:self.arm_dof] = qdd_ref
-        mj.mj_mulM(self.model, self.data, self._buf_out, self._buf_in)
-        tau = self.data.qfrc_bias[:self.arm_dof] + self._buf_out[:self.arm_dof] + self.dof_damping * qd
-
-        if self.tau_limit is not None:
-            tau = np.clip(tau, -self.tau_limit, self.tau_limit)
-
-        self.last_ctrl_torque = tau
-        self.data.ctrl[:self.arm_dof] = tau
-        mj.mj_step(self.model, self.data)
-
-    def reset(self):
-        self.last_ctrl_torque.fill(0)
-
-class UR5ePIDController:
-    """
-        单层位置 PID 直接输出力矩。
-        τ = PID(q) + Kd·qd_des + qfrc_bias + M(q)·qdd_des
-    """
-    def __init__(self, model, data, pos_p, pos_i, pos_d, arm_dof=6,
-                 ctrl_steps=1, tau_limit=None):
-        self.model, self.data, self.arm_dof = model, data, arm_dof
-        self.ctrl_steps = ctrl_steps
-        self.tau_limit = None if tau_limit is None else MathUtils._as_vec(tau_limit, arm_dof)
-        self.kd = MathUtils._as_vec(pos_d, arm_dof)
-        self.pid = PID(MathUtils._as_vec(pos_p, arm_dof), MathUtils._as_vec(pos_i, arm_dof), self.kd,
-                       tau_limit, differential_on_measurement=True)
-        self.pid.setpoint = self.data.qpos[:].copy()
-        self._buf_in = np.zeros(model.nv)      # mj_mulM 要求 nv 维
-        self._buf_out = np.zeros(model.nv)
-        self.last_pid_out = np.zeros(arm_dof)
-        self.last_ctrl_torque = np.zeros(arm_dof)
-
-    def _inertia_torque(self, qdd):
-        self._buf_in[:self.arm_dof] = qdd
-        mj.mj_mulM(self.model, self.data, self._buf_out, self._buf_in)
-        return self._buf_out[:self.arm_dof]
-
-    def __call__(self, desired_pos, desired_vel=None, desired_acc=None):
-        self.pid.setpoint = np.asarray(desired_pos, float)
-        dt = self.model.opt.timestep
-        for _ in range(self.ctrl_steps):
-            tau_pid = self.pid(self.data.qpos[:self.arm_dof], dt)
-            tau = tau_pid + self.data.qfrc_bias[:self.arm_dof]
-            if desired_vel is not None:
-                tau = tau + self.kd * np.asarray(desired_vel, float)
-            if desired_acc is not None:
-                tau = tau + self._inertia_torque(np.asarray(desired_acc, float))
-            if self.tau_limit is not None:
-                tau = np.clip(tau, -self.tau_limit, self.tau_limit)
-            self.last_pid_out = tau_pid.copy()
-            self.last_ctrl_torque = tau.copy()
-            self.data.ctrl[:self.arm_dof] = tau
-            mj.mj_step(self.model, self.data)
-
-    def reset(self):
-        self.pid.reset()
-        self.pid.setpoint = self.data.qpos[:self.arm_dof].copy()  # 防复位后跳变
-        self.last_pid_out = np.zeros(self.arm_dof)
-        self.last_ctrl_torque = np.zeros(self.arm_dof)
-
-class TrajectoryGenerator:
-    """
-        流式 waypoint 五次多项式轨迹生成器：每段固定 n_steps 个点，段间 C2 连续。
-        end_vel='secant' 时段末速度按割线法自动估算，过 waypoint 不停车。
-    """
-    def __init__(self, n_dof: int, end_vel: str = 'stop', alpha: float = 0.8, v_max: float = 1.57):
-        self.n_dof = n_dof
-        self.end_vel = end_vel      # 'stop'：段末 qd=0；'secant'：割线法估算
-        self.alpha = alpha          # 割线速度系数（0~1，越大越激进）
-        self.v_max = v_max          # 段末速度钳位 (rad/s)
-        self.reset()
-
-    def reset(self):
-        self.active = False
-        self.c = None
-        self.q_end = np.zeros(self.n_dof)
-        self.qd_end = np.zeros(self.n_dof)
-        self.qdd_end = np.zeros(self.n_dof)
-
-    def replan(self, q_target, n_steps, dt,
-               qd_target=None, qdd_target=None,
-               q_start=None, qd_start=None, qdd_start=None):
-        """
-            生成新段；q_start 为 None 时自动继承前段末端状态。
-            qd_target 为 None 时按 self.end_vel 模式决定段末速度。
-        """
-        if n_steps <= 0:
-            raise ValueError("n_steps must be > 0")
-        self.n_steps, self.dt, self.T = n_steps, dt, n_steps * dt
-
-        q1 = np.asarray(q_target, float)
-        qdd1 = np.zeros(self.n_dof) if qdd_target is None else np.asarray(qdd_target, float)
-        if q_start is None:
-            if not self.active:
-                raise RuntimeError("首段需提供 q_start")
-            q0, qd0, qdd0 = self.q_end, self.qd_end, self.qdd_end
-        else:
-            q0 = np.asarray(q_start, float)
-            qd0 = np.zeros(self.n_dof) if qd_start is None else np.asarray(qd_start, float)
-            qdd0 = np.zeros(self.n_dof) if qdd_start is None else np.asarray(qdd_start, float)
-
-        if qd_target is not None:                       # 显式给定优先
-            qd1 = np.asarray(qd_target, float)
-        elif self.end_vel == 'secant':                  # 割线法：本段平均速度 × α，钳位
-            qd1 = np.clip(self.alpha * (q1 - q0) / self.T, -self.v_max, self.v_max)
-        else:                                           # 'stop'：段末静止
-            qd1 = np.zeros(self.n_dof)
-
-        T = self.T
-        T2, T3, T4, T5 = T**2, T**3, T**4, T**5
-        dq = q1 - (q0 + qd0*T + 0.5*qdd0*T2)
-        dv = qd1 - (qd0 + qdd0*T)
-        da = qdd1 - qdd0
-        c3 = 10*dq/T3 - 4*dv/T2 + 0.5*da/T
-        c4 = -15*dq/T4 + 7*dv/T3 - da/T2
-        c5 = 6*dq/T5 - 3*dv/T4 + 0.5*da/T3
-        self.c = np.stack([q0, qd0, 0.5*qdd0, c3, c4, c5], axis=-1)
-
-        self.q_end, self.qd_end, self.qdd_end = self._eval(self.c, self.T)
-        self.active = True
-        return self
-
-    def get_points(self):
-        """返回 (q, qd, qdd, t)，采样区间 (0, T]，不含起点避免与上段重复。"""
-        if not self.active:
-            raise RuntimeError("先调用 replan()")
-        ts = np.arange(1, self.n_steps + 1) * self.dt
-        k = np.arange(6)
-        P   = ts[:, None] ** k
-        Pd  = k * ts[:, None] ** np.clip(k - 1, 0, None)
-        Pdd = k * (k - 1) * ts[:, None] ** np.clip(k - 2, 0, None)
-        return P @ self.c.T, Pd @ self.c.T, Pdd @ self.c.T, ts
-
-    @staticmethod
-    def _eval(c, t):
-        t2, t3, t4, t5 = t**2, t**3, t**4, t**5
-        q   = c[...,0] + c[...,1]*t + c[...,2]*t2 + c[...,3]*t3 + c[...,4]*t4 + c[...,5]*t5
-        qd  = c[...,1] + 2*c[...,2]*t + 3*c[...,3]*t2 + 4*c[...,4]*t3 + 5*c[...,5]*t4
-        qdd = 2*c[...,2] + 6*c[...,3]*t + 12*c[...,4]*t2 + 20*c[...,5]*t3
-        return q, qd, qdd
-
 
 class UR5eController:
     def __init__(self, model, data, urdf_filename,
-                 pos_p, pos_d, pos_v, vel_p, vel_i,
                  m, j, k_t, k_r,zeta_r,zeta_t,b_t,b_r,
                  arm_dof=6,
-                 vel_limit=3.1416/2,
                  tau_limit=np.array([150, 150, 150, 28, 28, 28]),
                  f_0=np.zeros(6),
                  is_use_force_control=False,
-                 # CTC参数
-                 ctc_kp=None, ctc_kd=None,
                  # 力校准参数
                  eef_body_id=None, 
                  eef_site_id=None,
@@ -497,18 +229,9 @@ class UR5eController:
         )
         self.admittance_controller.f0 = f_0.copy()
 
-        # IK求解器
+        # IK求解器（仅用于 reset 求初始关节角；运行时控制为纯 OSC，不经过 IK）
         self.solver = UR5eIK(urdf_filename=urdf_filename, verbose=verbose)
-
-        # 内环控制器
-        self.inner_controller = CTCController(
-            model, data, kp=ctc_kp, kd=ctc_kd,
-            tau_limit=tau_limit, arm_dof=arm_dof
-        )
         self.tau_limit = np.asarray(tau_limit, float)
-
-        # 控制模式: osc（操作空间控制，无 IK）或 ik（IK+CTC 关节内环）
-        self.ctrl_mode = os.environ.get("UR5E_CTRL_MODE", "osc").lower()
 
         # ---- OSC 参数（SERL opspace 风格：J^T·Λ·ẍ + 零空间姿态 PD + 重力补偿）----
         self.osc_kp_pos = np.full(3, 2500.0)    # 位置刚度
@@ -535,31 +258,23 @@ class UR5eController:
         self.osc_kd_pos = 2 * self.osc_damping_ratio * np.sqrt(self.osc_kp_pos)
         self.osc_kd_ori = 2 * self.osc_damping_ratio * np.sqrt(self.osc_kp_ori)
 
-        # 轨迹生成器
-        self.trajectory_generator = TrajectoryGenerator(n_dof=arm_dof, end_vel='secant', alpha=0.5, v_max=vel_limit)
-
         # 缓存最新校准力和导纳输出，供外部诊断
         self.calibrated_ft = np.zeros(6)
         self.max_calibrated_ft  = np.zeros(6) 
         self.admittance_dx = np.zeros(3)
         self.admittance_dq = np.array([1.0, 0, 0, 0])
 
-        self.active = False  # 控制循环是否激活
-
     def reset(self):
-        self.active = False
         self.calibrated_ft = np.zeros(6)
-        self.max_calibrated_ft  = np.zeros(6) 
+        self.max_calibrated_ft  = np.zeros(6)
         self.admittance_dx = np.zeros(3)
         self.admittance_dq = np.array([1.0, 0, 0, 0])
-        
-        self.trajectory_generator.reset()
+
         self.admittance_controller.reset()
         self.ft_calibration.reset()
-        self.inner_controller.reset()
 
     def reset_admittance(self):
-        """仅复位导纳状态，保留PID/CTC和力校准状态"""
+        """仅复位导纳状态，保留力校准状态"""
         self.admittance_controller.reset()
 
     def read_calibrate_force(self, dt=None):
@@ -631,66 +346,15 @@ class UR5eController:
 
         if not self.is_use_force_control:
             return np.zeros(3), np.array([1.0, 0, 0, 0])
-        
-        if not self.is_use_force_control:
-            return np.zeros(3), np.array([1.0, 0, 0, 0])
-        
+
         dx, dq = self.admittance_controller.get_output(ft, dt=dt)
         self.admittance_dx = dx.copy()
 
         self.admittance_dq = dq.copy()
         return dx, dq
     
-    def update(self, dst_pos, dst_quat, admittance_ratio=10, admittance_sub_steps=10):
-        """移动到目标位姿"""
-        if self.ctrl_mode == "osc":
-            return self.update_osc(dst_pos, dst_quat, admittance_ratio, admittance_sub_steps)
-        dt = self.model.opt.timestep * admittance_sub_steps   # 点间隔 = 每段实际仿真时长
-        ts = self.model.opt.timestep
-        q_now = self.data.qpos[:self.arm_dof].copy()
-
-        q_target = self.solver.ik(dst_pos, dst_quat, q_now)
-        if q_target is None:
-            q_target = q_now.copy()
-
-        if not self.active:
-            self.active = True
-            self._q_des_prev = None                            # 差分链随首段重建
-            self.trajectory_generator.replan(q_target, admittance_ratio, dt,
-                                            q_start=q_now, qd_start=np.zeros(self.arm_dof))
-        else:
-            self.trajectory_generator.replan(q_target, admittance_ratio, dt)
-        q_list, qd_list, qdd_list, _ = self.trajectory_generator.get_points()
-
-        for k in range(len(q_list)):
-            f = self.read_calibrate_force(dt=dt)
-            dx, dq = self._compute_admittance_offset(f, dt)
-
-            pos, quat = self.solver.fk(q_list[k])
-            pos = pos + dx
-            quat = quat_multiply(dq, quat)
-
-            q_des = self.solver.ik(pos, quat, self.data.qpos[:self.arm_dof].copy())
-            if q_des is None:                                  # IK 失败：保持上次参考，断差分链
-                q_des = self._q_des_prev[0] if self._q_des_prev is not None else q_now
-                qd_des, qdd_des = np.zeros(self.arm_dof), np.zeros(self.arm_dof)
-            elif self._q_des_prev is None:                     # 首点：用生成器前馈
-                qd_des, qdd_des = qd_list[k], qdd_list[k]
-            else:                                              # 差分：前馈对应调整后参考
-                q_prev, qd_prev = self._q_des_prev
-                dq_j = (q_des - q_prev + np.pi) % (2 * np.pi) - np.pi   # 角度回绕
-                qd_des = dq_j / dt
-                qdd_des = (qd_des - qd_prev) / dt
-
-            # 子步斜坡：参考从 q_des − qd·dt 匀速走到 q_des，与常值前馈一致
-            for j in range(1, admittance_sub_steps + 1):
-                q_ref = q_des + qd_des * ((j - admittance_sub_steps) * ts)
-                self.inner_controller(q_ref, qd_des=qd_des, qdd_des=qdd_des)
-
-            self._q_des_prev = (q_des.copy(), qd_des.copy())
-            
     # ============================================================
-    #  OSC 路径：操作空间控制（SERL opspace 风格），全程无 IK
+    #  OSC：操作空间控制（SERL opspace 风格），全程无 IK
     # ============================================================
     def _osc_tau(self, pos_t, quat_t, vel_ff=None):
         """计算 OSC 力矩：τ = JᵀΛẍ_des + Nᵀτ₀ + qfrc_bias；vel_ff 为目标任务空间速度前馈"""
@@ -767,7 +431,7 @@ class UR5eController:
         s_th = np.sin(th)
         return (np.sin((1.0 - s) * th) / s_th) * q0 + (np.sin(s * th) / s_th) * q1
 
-    def update_osc(self, dst_pos, dst_quat, admittance_ratio=10, admittance_sub_steps=10):
+    def update(self, dst_pos, dst_quat, admittance_ratio=10, admittance_sub_steps=10):
         """OSC 移动到目标位姿：笛卡尔斜坡 + 导纳偏移 + 每 1ms 力矩控制"""
         dt = self.model.opt.timestep * admittance_sub_steps
 

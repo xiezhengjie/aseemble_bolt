@@ -133,11 +133,6 @@ class AssembleMuJoCoEnv(Env):
         admittance_torque_deadzone=0.01,
         f_0=np.zeros(6),
 
-        # --- CTC内环参数 ---
-        # 目标：轨迹跟踪 -3 dB 带宽 ≥ 10 Hz（理论 ≈ 11.85 Hz @ kp=1000, kd=100）
-        ctc_kp=np.array([10000.0, 672.3, 10000.0, 10000.0, 10000.0, 10000.0]),
-        ctc_kd=np.array([200.0, 51.86, 200.0, 200.0, 200.0, 200.0]),
-
         # --- 力校准参数 ---
         cutoff_freq=30,
         force_threshold_sensor=0,
@@ -248,15 +243,13 @@ class AssembleMuJoCoEnv(Env):
         self.traj_max_vel = traj_max_vel
         self.traj_settle_steps = traj_settle_steps
 
-        # ===== 控制器（整合力校准→导纳→CTC）=====
+        # ===== 控制器（力校准→导纳→OSC）=====
         # 力校准质量 = 末端工具重力对应的质量
         tool_mass = self.model.body_mass[self.eef_body_id]
         self.ur5e_controller = UR5eController(
             model=self.model,
             data=self.data,
             urdf_filename=urdf_path,
-            # PID参数（CTC模式下不使用，保留接口）
-            pos_p=0, pos_d=0, pos_v=0, vel_p=0, vel_i=0,
             # 导纳参数
             m=admittance_m, j=admittance_j,
             k_t=admittance_k_t, k_r=admittance_k_r,
@@ -264,8 +257,6 @@ class AssembleMuJoCoEnv(Env):
             b_t=admittance_b_t, b_r=admittance_b_r,
             f_0=f_0,
             is_use_force_control=is_use_force_control,
-            # CTC内环
-            ctc_kp=ctc_kp, ctc_kd=ctc_kd,
             # 力校准
             mass=tool_mass,
             cutoff_freq=cutoff_freq,
