@@ -28,21 +28,25 @@ class OfflineStateMachine:
 
     def __init__(
         self,
-        assembly_depth_threshold=0.0045,
+        success_depth_threshold=0.008,
         success_pos_threshold=0.004,
         success_reach_hole_threshold=0.01044,
-        success_force_threshold=1.5,
+        success_force_threshold=2.0,
         success_torque_threshold=0.05,
+        success_angle_z_threshold_deg=1.0,
+        success_consecutive_frames=3,
         force_threshold_terminate=50.0,
         torque_threshold_terminate=5.0,
         workspace=None,
         skip_angle_z=True,
     ):
-        self.assembly_depth_threshold = assembly_depth_threshold
+        self.success_depth_threshold = success_depth_threshold
         self.success_pos_threshold = success_pos_threshold
         self.success_reach_hole_threshold = success_reach_hole_threshold
         self.success_force_threshold = success_force_threshold
         self.success_torque_threshold = success_torque_threshold
+        self.success_angle_z_threshold_deg = success_angle_z_threshold_deg
+        self.success_consecutive_frames = success_consecutive_frames
         self.force_threshold_terminate = force_threshold_terminate
         self.torque_threshold_terminate = torque_threshold_terminate
         self.workspace = np.array([[-0.04, -0.04, -0.012],
@@ -96,31 +100,26 @@ class OfflineStateMachine:
                 self.current_state = 2
 
         if self.current_state == 2:
-            if (depth >= self.assembly_depth_threshold and
-                abs(depth - self.prev_depth) < 2e-4 and
-                pos_error_xy <= 0.0015 and
+            angle_ok = self.skip_angle_z or angle_z < self.success_angle_z_threshold_deg
+            if (depth >= self.success_depth_threshold and
                 np.abs(ft[2]) >= self.success_force_threshold and
-                np.linalg.norm(ft[:2]) <= 0.3 * self.success_force_threshold and
-                np.linalg.norm(ft[3:]) <= self.success_torque_threshold):
+                angle_ok):
                 self.seat_count += 1
             else:
                 self.seat_count = 0
-            if self.seat_count >= 3:
+            if self.seat_count >= self.success_consecutive_frames:
                 self.current_state = 3
 
         self.prev_depth = depth
         return self.current_state, fail_reason
 
     def seat_flags(self, depth, prev_depth, pos_error_xy, ft, angle_z=0.0):
-        """单帧坐底 7 条件（不含连续 3 拍）。"""
-        angle_ok = True if self.skip_angle_z else (np.abs(angle_z) <= 1)
+        """单帧坐底条件（不含连续帧计数）。"""
+        angle_ok = True if self.skip_angle_z else angle_z < self.success_angle_z_threshold_deg
         flags = {
-            "depth>=th": depth >= self.assembly_depth_threshold,
-            "depth_stagnant": abs(depth - prev_depth) < 2e-4,
-            "xy<=1.5mm": pos_error_xy <= 0.0015,
+            "depth>=8mm": depth >= self.success_depth_threshold,
             "|fz|>=th": np.abs(ft[2]) >= self.success_force_threshold,
-            "|fxy|<=0.3th": np.linalg.norm(ft[:2]) <= 0.3 * self.success_force_threshold,
-            "|t|<=th": np.linalg.norm(ft[3:]) <= self.success_torque_threshold,
+            "angle_z<1deg": angle_ok,
         }
         flags["all"] = all(flags.values())
         return flags
@@ -336,8 +335,7 @@ def analyze_file(path, sm_kwargs=None, pad_last=False):
         }
 
     def bottleneck_I(rs):
-        keys = ["depth>=th", "depth_stagnant", "xy<=1.5mm", "|fz|>=th",
-                "|fxy|<=0.3th", "|t|<=th", "all"]
+        keys = ["depth>=8mm", "|fz|>=th", "angle_z<1deg", "all"]
         if not rs:
             return {"n": 0, "ever": {k: 0 for k in keys}, "at_best": {k: 0 for k in keys},
                     "max_seat": None, "extras": []}
@@ -383,7 +381,7 @@ def analyze_file(path, sm_kwargs=None, pad_last=False):
         "max_tn_at_deep": [],
         "min_|yaw|_deg": [],
     }
-    deep_th = 0.0045
+    deep_th = 0.008
     for r in results:
         glob["min_pos_xy_mm"].append(min(h["pos_error_xy"] for h in r["hist"]) * 1000)
         glob["max_depth_mm"].append(max(h["depth"] for h in r["hist"]) * 1000)
@@ -461,11 +459,11 @@ def print_report(rep):
     gline("min pos_z", "min_pos_z_mm", "mm")
     gline("max |fz|", "max_|fz|", "N")
     gline("min |yaw|", "min_|yaw|_deg", "deg")
-    print(f"  depth>=4.5mm 的 episode: {rep['n_deep_eps']}/{rep['n']}")
+    print(f"  depth>=8mm 的 episode: {rep['n_deep_eps']}/{rep['n']}")
     if g["min_|fz|_at_deep"]:
-        gline("depth>=4.5mm 时 min |fz|", "min_|fz|_at_deep", "N")
-        gline("depth>=4.5mm 时 max |fxy|", "max_fxy_at_deep", "N")
-        gline("depth>=4.5mm 时 max |t|", "max_tn_at_deep", "Nm")
+        gline("depth>=8mm 时 min |fz|", "min_|fz|_at_deep", "N")
+        gline("depth>=8mm 时 max |fxy|", "max_fxy_at_deep", "N")
+        gline("depth>=8mm 时 max |t|", "max_tn_at_deep", "Nm")
 
     if rep["stuck_R"]["n"]:
         b = rep["stuck_R"]
@@ -492,11 +490,10 @@ def print_report(rep):
     if rep["stuck_I"]["n"]:
         b = rep["stuck_I"]
         print("-" * 88)
-        print(f"卡在 2 插入 的 {b['n']} 条: I→T 需连续 3 拍 (xy<=1.5mm, 已去掉 angle_z)")
+        print(f"卡在 2 插入 的 {b['n']} 条: I→T 需连续 3 拍 (depth>=8mm, |fz|>=2N, angle_z<1deg)")
         print(f"  轨迹内 max seat_count min/med/max: {b['max_seat']}")
         print("  条件在某帧成立过 / 在最佳候选帧成立:")
-        for k in ["depth>=th", "depth_stagnant", "xy<=1.5mm", "|fz|>=th",
-                  "|fxy|<=0.3th", "|t|<=th", "all"]:
+        for k in ["depth>=8mm", "|fz|>=th", "angle_z<1deg", "all"]:
             print(f"    {k:<16} ever {b['ever'][k]:4d}/{b['n']}   best-frame {b['at_best'][k]:4d}/{b['n']}")
         # 打印若干典型卡住样本
         extras = sorted(b["extras"], key=lambda x: -x["depth_mm"])
@@ -511,8 +508,7 @@ def print_report(rep):
         b = rep["success_I"]
         print("-" * 88)
         print(f"走到 3 成功 的 {rep['counts'][3]} 条: 坐底条件 ever / 最佳帧")
-        for k in ["depth>=th", "depth_stagnant", "xy<=1.5mm", "|fz|>=th",
-                  "|fxy|<=0.3th", "|t|<=th", "all"]:
+        for k in ["depth>=8mm", "|fz|>=th", "angle_z<1deg", "all"]:
             print(f"    {k:<16} ever {b['ever'][k]:4d}/{b['n']}   best-frame {b['at_best'][k]:4d}/{b['n']}")
 
 
@@ -534,8 +530,7 @@ def main():
     print("约定: depth = -pos_z")
     print("R→S: xy<=8mm 且 depth>=-4mm")
     print("S→I: xy<=3mm 且 |yaw|<=7deg 且 depth>=-3mm")
-    print("I→T: depth>=4.5mm 且 |Δdepth|<0.2mm 且 xy<=1.5mm 且 |fz|>=1.5N")
-    print("      且 |fxy|<=0.45N 且 |t|<=0.05Nm 连续3拍 (已去掉 angle_z)")
+    print("I→T: depth>=8mm 且 |fz|>=2N 且 angle_z<1deg 连续3帧")
     print("F: |f|>50N 或 |t|>5Nm 或出工作空间 或 接近阶段连续回退")
     print("注意: 录制存的是 step 前观测，成功当拍 post-step 未写入。")
     print("      pad_last=True 时复制末帧补这一拍，才是和在线 _state_trans 对齐的评估。")

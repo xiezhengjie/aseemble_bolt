@@ -36,10 +36,10 @@ class EpisodeStatsWrapper(Wrapper):
 
     适配 gym 标准环境（如 MountainCarContinuous-v0）与自定义环境（如 AssembleMuJoCoEnv）。
     success 优先取 env 的 info['success']；环境未提供该字段时不写入。
-    插装任务额外转发 depth / position_error_xy / yaw_error，供 TensorBoard tasks/*。
+    插装任务额外转发 depth / position_error_xy / yaw_error / angle_z，供 TensorBoard tasks/*。
     """
 
-    _TASK_KEYS = ("depth", "position_error_xy", "yaw_error", "state")
+    _TASK_KEYS = ("depth", "position_error_xy", "yaw_error", "angle_z", "state")
 
     def __init__(self, env):
         super().__init__(env)
@@ -1059,6 +1059,8 @@ class ResidualCollector:
                                     info, jj, "position_error_xy"),
                                 "yaw_error": _task_metric_from_info(
                                     info, jj, "yaw_error"),
+                                "angle_z": _task_metric_from_info(
+                                    info, jj, "angle_z"),
                             })
                         ep_ret[dones] = 0.0
                         ep_len[dones] = 0
@@ -1189,12 +1191,18 @@ def train_sac_gail_residual(env, eval_env, agent, disc, buffer_r, buffer_g, buff
                 depth_v = _finite_mean_list(e.get("depth") for e in episodes)
                 xy_v = _finite_mean_list(e.get("position_error_xy") for e in episodes)
                 yaw_v = _finite_mean_list(e.get("yaw_error") for e in episodes)
+                angle_z_v = _finite_mean_list(
+                    abs(e["angle_z"]) if e.get("angle_z") is not None else None
+                    for e in episodes
+                )
                 if depth_v is not None:
                     writer.add_scalar("tasks/depth (m)", depth_v, global_step)
                 if xy_v is not None:
                     writer.add_scalar("tasks/position_error_xy (m)", xy_v, global_step)
                 if yaw_v is not None:
                     writer.add_scalar("tasks/yaw_error (deg)", yaw_v, global_step)
+                if angle_z_v is not None:
+                    writer.add_scalar("tasks/angle_z (deg)", angle_z_v, global_step)
 
         # ---------- 周期评估 ----------
         if eval_env is not None and global_step % eval_interval < steps_per_iter:
@@ -1495,12 +1503,18 @@ def train_sac_gail_residual_ss(env, eval_env, agent, disc, buffer_r, expert_ss,
                 depth_v = _finite_mean_list(e.get("depth") for e in episodes)
                 xy_v = _finite_mean_list(e.get("position_error_xy") for e in episodes)
                 yaw_v = _finite_mean_list(e.get("yaw_error") for e in episodes)
+                angle_z_v = _finite_mean_list(
+                    abs(e["angle_z"]) if e.get("angle_z") is not None else None
+                    for e in episodes
+                )
                 if depth_v is not None:
                     writer.add_scalar("tasks/depth (m)", depth_v, global_step)
                 if xy_v is not None:
                     writer.add_scalar("tasks/position_error_xy (m)", xy_v, global_step)
                 if yaw_v is not None:
                     writer.add_scalar("tasks/yaw_error (deg)", yaw_v, global_step)
+                if angle_z_v is not None:
+                    writer.add_scalar("tasks/angle_z (deg)", angle_z_v, global_step)
 
         # ---------- 周期评估 ----------
         if eval_env is not None and global_step % eval_interval < steps_per_iter:

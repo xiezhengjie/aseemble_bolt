@@ -92,8 +92,10 @@ class AssembleMuJoCoEnv(Env):
         success_pos_threshold=0.004,
         success_reach_hole_threshold=0.01044,
         success_search_hole_threshold=1,
-        success_force_threshold = 1.5,
+        success_force_threshold = 2.0,
         success_torque_threshold = 0.05,
+        success_angle_z_threshold_deg = 1.0,
+        success_consecutive_frames = 3,
         force_threshold_terminate=50.0,
         torque_threshold_terminate=5.0,
 
@@ -206,6 +208,8 @@ class AssembleMuJoCoEnv(Env):
         self.success_search_hole_threshold = success_search_hole_threshold
         self.success_force_threshold = success_force_threshold
         self.success_torque_threshold = success_torque_threshold
+        self.success_angle_z_threshold_deg = success_angle_z_threshold_deg
+        self.success_consecutive_frames = success_consecutive_frames
         self.force_threshold_terminate = force_threshold_terminate
         self.torque_threshold_terminate = torque_threshold_terminate
 
@@ -475,10 +479,8 @@ class AssembleMuJoCoEnv(Env):
 
     def _get_info(self):
         """返回诊断信息"""
-        # 计算工具z轴(销钉轴)相对世界竖直方向的偏转角，用于分析工具是否垂直
         eef_rot = self.data.site_xmat[self.eef_site_id].reshape(3, 3)
-        z_axis = eef_rot[:, 2] * np.sign(eef_rot[2, 2])
-        angle_z = np.degrees(np.arccos(np.clip(z_axis[2], -1.0, 1.0)))
+        angle_z = self._get_angle_z()
         rz = np.degrees(np.arctan2(eef_rot[1, 0], eef_rot[0, 0]))
         return {
             'force': self.ur5e_controller.calibrated_ft[:3].copy(),
@@ -495,6 +497,12 @@ class AssembleMuJoCoEnv(Env):
             'success': self.current_state == 3,
             **self.last_reward_terms,
         }
+
+    def _get_angle_z(self):
+        """工具 z 轴相对世界竖直方向的夹角，单位为度。"""
+        eef_rot = self.data.site_xmat[self.eef_site_id].reshape(3, 3)
+        z_axis = eef_rot[:, 2] * np.sign(eef_rot[2, 2])
+        return float(np.degrees(np.arccos(np.clip(z_axis[2], -1.0, 1.0))))
 
     # ============================================================
     #  动作转换
@@ -677,24 +685,17 @@ class AssembleMuJoCoEnv(Env):
         
         # 2: 插入(I)
         if self.current_state == 2:
-            # # 3: 成功(T)：坐底判据：深度达标 + 深度停滞 + 法向力持续（三条件防抖）
-            # if (depth >= self.assembly_depth_threshold and
-            #     abs(depth - self.prev_depth) < 2e-4 and                         # 还在发向下指令但深度不再涨 = 顶到底了
-            #     pos_error_xy <= 0.0015 and                  # xy 轴误差在期望范围内
-            #     np.abs(ft[2]) >= self.success_force_threshold and               # 降到 success_force_threshold N 并靠持续拍数保证
-            #     np.linalg.norm(ft[:2]) <= 0.3*self.success_force_threshold and  # 0.45N
-            #     np.linalg.norm(ft[3:]) <= self.success_torque_threshold):
-            #     self.seat_count = self.seat_count + 1 
-            # else:
-            #     self.seat_count = 0
-            # # 连续 3 拍坐底说明成功插入，置位
-            # if self.seat_count >= 3:    
-            #     self.current_state = 3
-            if (depth >= 0.008 and                                     
-                np.abs(ft[2]) >= self.success_force_threshold and              
-                np.linalg.norm(ft[:2]) <= 0.3*self.success_force_threshold ):
+            angle_z = self._get_angle_z()
+            seated = (
+                depth >= self.HOLE_DEPTH and
+                np.abs(ft[2]) >= self.success_force_threshold and
+                angle_z < self.success_angle_z_threshold_deg
+            )
+            self.seat_count = self.seat_count + 1 if seated else 0
+            if self.seat_count >= self.success_consecutive_frames:
                 self.current_state = 3
             elif (pos_error_xy > 0.003 or np.abs(yaw_error) > np.deg2rad(6) or depth < 0.001):
+                self.seat_count = 0
                 self.current_state = 1
 
 
