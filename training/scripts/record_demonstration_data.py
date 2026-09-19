@@ -205,47 +205,51 @@ class DataRecorder:
         dr_z = (abs(ax5) > self.DEADZONE) * (1 - 2* self.joystick.get_button(5)) * ax5 # RB 控制 Z 轴旋转方向
         delta_euler = np.array([dr_x, dr_y, dr_z])
 
-        action = np.concatenate([delta_pos / (self.move_mode + 1), delta_euler / (self.move_mode + 1)])
-        
         if self.ctrl_mode == 0:
-           if not np.allclose(self.action_zero, action, rtol=0, atol=self.TOLERANCE): # 当有动作变化时才运动
-                # 应用低通滤波器, 以减少动作的抖动
-                action = self.filter.filter(action)
-                if not np.allclose(self.action_zero, action, rtol=0, atol=self.TOLERANCE): # 当有动作变化时才运动
-                    obs, reward, terminated, truncated, info = self.env.step(action)
-                    if self.is_recording:
-                        self.logger.info(f"记录动作: {action}, 当前步数: {self.env.current_step}, 深度: {info['depth']}, 状态: {info['state']}, \
-                                         力: {info['force']}, 力矩: {info['torque']}, 位置误差xy: {info['position_error_xy']}, 偏角: {info['angle_z']}, yaw误差: {info['yaw_error']}")
-                        self.record_buffer[-1][0].append(observation)
-                        self.record_buffer[-1][1].append(action)
-                        self.record_buffer[-1][2].append(terminated or truncated)
+            raw_action = np.concatenate([delta_pos / (self.move_mode + 1),
+                                         delta_euler / (self.move_mode + 1)])
+            if np.allclose(raw_action, self.action_zero, rtol=0, atol=1e-6):
+                self.filter.reset()
+                action = self.action_zero
+            else:
+                action = self.filter.filter(raw_action)
 
-                        done = info['success']
-                        if terminated and not done:
-                            self.env.reset(options={'random_delta': self.random_delta})
-                            self.filter.reset()
-                            self.move_mode = 0
+            if not np.allclose(self.action_zero, action, rtol=0, atol=self.TOLERANCE):
+                obs, reward, terminated, truncated, info = self.env.step(action)
+                if self.is_recording:
+                    self.logger.info(f"记录动作: {action}, 当前步数: {self.env.current_step}, 深度: {info['depth']}, 状态: {info['state']}, \
+                                     力: {info['force']}, 力矩: {info['torque']}, 位置误差xy: {info['position_error_xy']}, 偏角: {info['angle_z']}, yaw误差: {info['yaw_error']}")
+                    self.record_buffer[-1][0].append(observation)
+                    self.record_buffer[-1][1].append(action)
+                    self.record_buffer[-1][2].append(terminated or truncated)
+
+                    done = info['success']
+                    if terminated and not done:
+                        self.env.reset(options={'random_delta': self.random_delta})
+                        self.filter.reset()
+                        self.move_mode = 0
+                        self.record_buffer[-1] = [[],[],[]]
+                        self.logger.info(f"当前装配任务失败，录制退出，{len(self.record_buffer)-1}条录制完成，输出信息为：{info}")
+                    elif truncated:
+                        self.env.reset(options={'random_delta': self.random_delta})
+                        self.filter.reset()
+                        self.move_mode = 0
+                        self.record_buffer[-1] = [[],[],[]]
+                        self.logger.info(f"当前装配任务被截断，录制退出，{len(self.record_buffer)-1}条录制完成，输出信息为：{info}")
+                    elif done:
+                        final_yaw = self.record_buffer[-1][0][-1][3]
+                        final_yaw_deg = np.degrees(final_yaw)
+                        self.env.reset(options={'random_delta': self.random_delta})
+                        self.filter.reset()
+                        self.move_mode = 0
+                        if abs(final_yaw_deg) > self.MAX_FINAL_YAW_DEG:
                             self.record_buffer[-1] = [[],[],[]]
-                            self.logger.info(f"当前装配任务失败，录制退出，{len(self.record_buffer)-1}条录制完成，输出信息为：{info}")
-                        elif truncated:
-                            self.env.reset(options={'random_delta': self.random_delta})
-                            self.filter.reset()
-                            self.move_mode = 0
-                            self.record_buffer[-1] = [[],[],[]]
-                            self.logger.info(f"当前装配任务被截断，录制退出，{len(self.record_buffer)-1}条录制完成，输出信息为：{info}")
-                        elif done:
-                            final_yaw = self.record_buffer[-1][0][-1][3]
-                            final_yaw_deg = np.degrees(final_yaw)
-                            self.env.reset(options={'random_delta': self.random_delta})
-                            self.filter.reset()
-                            self.move_mode = 0
-                            if abs(final_yaw_deg) > self.MAX_FINAL_YAW_DEG:
-                                self.record_buffer[-1] = [[],[],[]]
-                                self.logger.warning(f"最终yaw={final_yaw_deg:.1f}°超过阈值{self.MAX_FINAL_YAW_DEG:.0f}°，丢弃该条录制，{len(self.record_buffer)-1}条录制完成")
-                            else:
-                                self.record_buffer.append([[],[],[]])
-                                self.logger.info(f"当前装配任务完成，完成录制第{len(self.record_buffer)-1}条录制，最终yaw={final_yaw_deg:.1f}°，输出信息为：{info}")
+                            self.logger.warning(f"最终yaw={final_yaw_deg:.1f}°超过阈值{self.MAX_FINAL_YAW_DEG:.0f}°，丢弃该条录制，{len(self.record_buffer)-1}条录制完成")
+                        else:
+                            self.record_buffer.append([[],[],[]])
+                            self.logger.info(f"当前装配任务完成，完成录制第{len(self.record_buffer)-1}条录制，最终yaw={final_yaw_deg:.1f}°，输出信息为：{info}")
         elif self.ctrl_mode == 1: 
+            action = np.concatenate([delta_pos / (self.move_mode + 1), delta_euler / (self.move_mode + 1)])
             obs, reward, terminated, truncated, info = self.env.step(action)
             # 每 5 步输出一次期望/实际位姿（每步都打会明显拖慢循环）
             self._free_log_ctr += 1
