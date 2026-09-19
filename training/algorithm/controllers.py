@@ -357,7 +357,7 @@ class UR5eController:
     #  OSC：操作空间控制（SERL opspace 风格），全程无 IK
     # ============================================================
     def _osc_tau(self, pos_t, quat_t, vel_ff=None):
-        """计算 OSC 力矩：τ = JᵀΛẍ_des + Nᵀτ₀ + qfrc_bias；vel_ff 为目标任务空间速度前馈"""
+        """计算 OSC 力矩：τ = JᵀΛẍ_des + Nᵀτ₀ + qfrc_bias + dof_damping·qd；vel_ff 为目标任务空间速度前馈"""
         m, d, n = self.model, self.data, self.arm_dof
 
         mj.mj_jacSite(m, d, self._jacp, self._jacr, self.eef_site_id)
@@ -413,7 +413,9 @@ class UR5eController:
         # 零空间姿态稳定（拉向 home，阻尼关节速度）
         tau0 = self.osc_null_kp * (self.osc_q_home - q) - self.osc_null_kd * qd
         N = self._eye_arm - Jbar @ J
-        tau = tau_task + N.T @ tau0 + d.qfrc_bias[:n]
+        # MuJoCo 把关节被动阻尼放在 qfrc_passive（-d·qd），不包含在 qfrc_bias 中。
+        # 补偿它，避免大阻尼模型的旋转通过雅可比耦合为末端位置漂移。
+        tau = tau_task + N.T @ tau0 + d.qfrc_bias[:n] + m.dof_damping[:n] * qd
 
         return np.clip(tau, -self.tau_limit, self.tau_limit)
 

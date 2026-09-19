@@ -261,6 +261,7 @@ class DataRecorder:
                     f"位置误差: {np.linalg.norm(self.env.last_pos - actual_pos) * 1000:.2f}mm | "
                     f"|F|: {np.linalg.norm(ctrl.calibrated_ft[:3]):.2f}N "
                     f"导纳偏移: {np.linalg.norm(ctrl.admittance_dx) * 1000:.2f}mm")
+                self.logger.info(f"action_pos={action[:3]}, action_rot={action[3:]}")
         
         return self.joystick.get_button(8) # Start 键退出
 
