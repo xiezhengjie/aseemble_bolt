@@ -234,8 +234,11 @@ class UR5eController:
         self.tau_limit = np.asarray(tau_limit, float)
 
         # ---- OSC 参数（SERL opspace 风格：J^T·Λ·ẍ + 零空间姿态 PD + 重力补偿）----
-        self.osc_kp_pos = np.full(3, 2500.0)    # 位置刚度
-        self.osc_kp_ori = np.full(3, 2500.0)    # 姿态刚度
+        # 轨迹速度由前馈承担，PD 只修正跟踪误差。姿态环不能过软：接触下
+        # 完整 Lambda 的平移/旋转交叉项会生成力矩，过低的姿态增益会让该项压过导纳方向。
+        self.osc_kp_pos = np.full(3, 5000.0)
+        self.osc_kp_ori = np.full(3, 2500.0)
+        self.osc_ori_ff_scale = 0.95          # 抑制高带宽姿态环的小幅速度前馈超调
         self.osc_damping_ratio = 1.0            # 临界阻尼
         self.osc_null_kp = 20.0                 # 零空间姿态刚度
         self.osc_null_kd = 2 * np.sqrt(self.osc_null_kp)
@@ -379,11 +382,11 @@ class UR5eController:
 
         # 任务空间速度（含前馈：阻尼作用在速度误差上，消除跟踪滞后）
         dx = J @ qd
-        v_des = np.zeros(6) if vel_ff is None else np.asarray(vel_ff, float)
-        # 接触门控：接触时前馈阻尼项会变成持续推力（kd·v_des），必须撤除
+        v_des = np.zeros(6) if vel_ff is None else np.asarray(vel_ff, float).copy()
+        # 接触时线速度前馈会变成持续推力，只撤掉平移部分；旋转轨迹仍需角速度前馈。
         f = self.calibrated_ft
         if np.sqrt(f[0]*f[0] + f[1]*f[1] + f[2]*f[2]) > 2.0:
-            v_des = np.zeros(6)
+            v_des[:3] = 0.0
         ddx_pos = self.osc_kp_pos * e_pos + self.osc_kd_pos * (v_des[:3] - dx[:3])
         ddx_ori = self.osc_kp_ori * e_ori + self.osc_kd_ori * (v_des[3:] - dx[3:])
         na = np.sqrt(ddx_pos @ ddx_pos)
@@ -392,23 +395,24 @@ class UR5eController:
             ddx_pos *= self.osc_max_pos_acc / na
         if nb > self.osc_max_ori_acc:
             ddx_ori *= self.osc_max_ori_acc / nb
-        ddx_des = np.concatenate([ddx_pos, ddx_ori])
-
         # 动力学一致伪逆：J̄ = M⁻¹JᵀΛ，Λ = (J M⁻¹ Jᵀ + λ²I)⁻¹
         MinvJt = np.linalg.solve(M, J.T)
         Lambda = np.linalg.inv(J @ MinvJt + (self.osc_lambda_damping ** 2) * self._eye6)
         Jbar = MinvJt @ Lambda
 
-        # 笛卡尔反馈力限幅（OSC 标准做法）：冲击/卡阻时自动软化
-        F_fb = Lambda @ ddx_des
+        # 完整 Λ 中的交叉项负责抵消平移/旋转惯性耦合。力或力矩超限时必须
+        # 对整个 wrench 等比例缩放；分块裁剪会破坏该比例并重新引入轴间串扰。
+        F_fb = Lambda @ np.concatenate([ddx_pos, ddx_ori])
         f3 = F_fb[:3]
         t3 = F_fb[3:]
         nf = np.sqrt(f3 @ f3)
         nt = np.sqrt(t3 @ t3)
+        wrench_scale = 1.0
         if nf > self.osc_max_force_fb:
-            F_fb[:3] *= self.osc_max_force_fb / nf
+            wrench_scale = min(wrench_scale, self.osc_max_force_fb / nf)
         if nt > self.osc_max_torque_fb:
-            F_fb[3:] *= self.osc_max_torque_fb / nt
+            wrench_scale = min(wrench_scale, self.osc_max_torque_fb / nt)
+        F_fb *= wrench_scale
         tau_task = J.T @ F_fb
         # 零空间姿态稳定（拉向 home，阻尼关节速度）
         tau0 = self.osc_null_kp * (self.osc_q_home - q) - self.osc_null_kd * qd
@@ -442,6 +446,10 @@ class UR5eController:
         T_total = admittance_ratio * dt
         vel_ff = np.zeros(6)
         vel_ff[:3] = (dst_pos - start_pos) / T_total               # 斜坡线速度前馈
+        R_start = _quat_to_rotmat_fast(start_quat)
+        R_dst = _quat_to_rotmat_fast(dst_quat)
+        vel_ff[3:] = (self.osc_ori_ff_scale
+                      * _rotmat_to_rotvec_fast(R_dst @ R_start.T) / T_total)
 
         for k in range(1, admittance_ratio + 1):
             f = self.read_calibrate_force(dt=dt)

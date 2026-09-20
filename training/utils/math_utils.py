@@ -86,6 +86,39 @@ def quat_to_rotmat(quat):
     rot = R.from_quat(quat_xyzw)
     return rot.as_matrix()
 
+def quat_conj(q):
+    """单位四元数共轭（即逆） [w, x, y, z]"""
+    q = np.asarray(q, dtype=np.float64)
+    out = q.copy()
+    out[1:] = -out[1:]
+    return out
+
+def rotvec_to_quat(rotvec):
+    """旋转矢量(模=转角[rad], 方向=世界系轴) → 四元数 [w, x, y, z]"""
+    rotvec = np.asarray(rotvec, dtype=np.float64)
+    angle = np.linalg.norm(rotvec)
+    if angle < 1e-12:
+        return np.array([1.0, 0.0, 0.0, 0.0])
+    axis = rotvec / angle
+    half = 0.5 * angle
+    return np.concatenate([[np.cos(half)], np.sin(half) * axis])
+
+def quat_to_rotvec(quat):
+    """四元数 [w, x, y, z] → 旋转矢量（模=转角[rad], 方向=世界系轴）"""
+    quat = np.asarray(quat, dtype=np.float64) / np.linalg.norm(quat)
+    w = min(1.0, max(-1.0, quat[0]))
+    angle = 2.0 * np.arccos(w)
+    if angle < 1e-9:
+        return np.zeros(3)
+    sin_half = np.sqrt(max(0.0, 1.0 - w * w))
+    if sin_half < 1e-9:                      # 角度接近 π，轴退化为向量部分方向
+        v = quat[1:]
+        n = np.linalg.norm(v)
+        if n < 1e-12:
+            return np.zeros(3)
+        return v / n * angle
+    return quat[1:] / sin_half * angle
+
 def quat_error_angle(q1, q2):
     """
     计算两个四元数之间的旋转角误差（弧度）

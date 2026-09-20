@@ -20,8 +20,9 @@
 叠成 (T, 10)，供 GRU 策略按时间步读取；录制演示不要叠帧。
 
 动作空间 (6维, [-1, 1]):
-    - 前3维: 末端位置增量 (× pos_action_scale=0.004, 即4mm/步)
-    - 后6维: 姿态增量欧拉角 [roll, pitch, yaw] (× ori_action_scale)
+    - 前3维: 末端位置增量 (× pos_action_scale=0.002, 即2mm/步)
+    - 后3维: 姿态增量欧拉角 [roll, pitch, yaw] (× ori_action_scale)
+    目标 = 当前实际位姿 + 本拍增量（世界系），不累计上一帧目标误差。
 """
 import os
 import sys
@@ -117,7 +118,7 @@ class AssembleMuJoCoEnv(Env):
 
         # --- 动作缩放 ---
         pos_action_scale=0.002,  # 每次最大移动2mm（均匀分配到10次导纳循环，每次0.2mm）
-        ori_action_scale=0.02, # 每次最大旋转0.02 rad， 即3.6度
+        ori_action_scale=0.01,  # 每次每轴最大旋转0.01rad（约0.57度）
 
         # --- 力控开关 ---
         is_use_force_control=True,
@@ -508,22 +509,20 @@ class AssembleMuJoCoEnv(Env):
     #  动作转换
     # ============================================================
     def _action_to_pose(self, action):
-        """策略动作(6维): 位置增量(3) + 欧拉角增量(3)"""
-        # 遥操时零动作保持上一帧目标位姿，避免 viewer 鼠标拖动导致跟随
-        if self.last_pos is not None and np.allclose(action, np.zeros(6), rtol=0, atol=1e-5):
+        """策略动作(6维): 当前实际位姿 + 位置/欧拉角增量。"""
+        # 遥操零动作保持上一目标，避免 viewer 鼠标拖动导致跟随；策略控制
+        # 包括零动作都锚定当前实际位姿，不再读取上一帧目标。
+        if (self.is_teleoperation and self.last_pos is not None
+                and np.allclose(action, np.zeros(6), rtol=0, atol=1e-5)):
             return self.last_pos.copy(), self.last_quat.copy()
 
-        # 获取当前位姿
         current_pos = self.data.site_xpos[self.eef_site_id].copy()
         current_quat = rotmat_to_quat(self.data.site_xmat[self.eef_site_id].reshape(3, 3))
 
-        # 位置
         dest_pos = current_pos + action[:3] * self.pos_action_scale
-
-        # 姿态
         dq = euler_to_quat(action[3:] * self.ori_action_scale)
         dest_quat = quat_multiply(dq, current_quat)
-        if np.dot(dest_quat, current_quat) < 0:   # 与上一帧同半球，增量路径最短
+        if np.dot(dest_quat, current_quat) < 0:
             dest_quat = -dest_quat
 
         # 更新缓存
