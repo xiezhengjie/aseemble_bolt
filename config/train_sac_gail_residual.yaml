@@ -1,0 +1,118 @@
+env:
+  num_envs: 4
+  max_episode_steps: 400
+
+trainer:
+  _target_: training.common.train_utils.ResidualGAILTrainer
+  seed: 1
+  total_timesteps: 500000
+  learning_starts: 0
+  batch_size: 256
+  policy_updates: 1
+  target_update_interval: 2
+  policy_lr_min_ratio: 0.3
+  disc_lr_min_ratio: 0.1
+  eval_interval: 5000
+  eval_episodes: 10
+  final_eval_episodes: 30
+  log_interval: 100
+  disc_updates: 2
+  disc_batch_size: 256
+  env_reward_weight: 0.3
+  gail_reward_coef: 1.0
+  success_reward: 100.0
+  residual_scale: 0.05
+  obs_horizon: ${base_policy.n_obs_steps}
+  action_interval: ${base_policy.n_action_steps}
+  sampling_steps: ${base_policy.num_inference_steps}
+  gail_reward_scale: true
+  is_save_model: true
+
+training:
+  seed: ${trainer.seed}      # set_seed 用
+  buffer_size: 200000         # buffers.replay.capacity 用
+  generator_window: 50000    # buffers.generator.window_size 用
+
+base_policy:
+  _target_: training.policy.diffusion_policy.DiffusionPolicy
+  horizon: 16
+  obs_dim: 10
+  action_dim: 6
+  n_action_steps: 8
+  n_obs_steps: 2
+  num_inference_steps: 100
+  warmstart_timestep: 50
+  eta: 0.0
+  lr: 1e-3
+  weight_decay: 0.0
+  model:
+    _target_: training.model.base.conditional_unet1d_sample.ConditionalUnet1D
+    input_dim: ${base_policy.action_dim}
+    global_cond_dim: ${eval:${base_policy.n_obs_steps} * ${base_policy.obs_dim}}
+    diffusion_step_embed_dim: 256
+    down_dims: [128, 256, 512]
+    kernel_size: 5
+    n_groups: 8
+  noise_scheduler:
+    _target_: diffusers.schedulers.scheduling_ddpm.DDPMScheduler
+    num_train_timesteps: 100
+    beta_start: 0.0001
+    beta_end: 0.02
+    beta_schedule: squaredcos_cap_v2
+    variance_type: fixed_small
+    clip_sample: true
+    prediction_type: epsilon
+
+policy:
+  _target_: training.policy.sac_policy.SACPolicy
+  hidden_dim: [256, 256]
+  actor_lr: 3e-4
+  critic_lr: 3e-4
+  alpha_lr: 1e-4
+  gamma: 0.99
+  tau: 0.005
+  alpha: 0.2
+  alpha_min: 0.02
+  target_entropy: -6.0
+  log_std_init: -3.0
+  autotune: true
+  use_sde: true
+
+discriminator:
+  _target_: training.policy.discriminator_policy.Discriminator
+  hidden_dim: [128, 128]
+  lr: 1e-4
+  smoothing: 0.05
+  ent_reg_scale: 0.001
+  grad_clip_norm: 1.0
+
+buffers:
+  expert:
+    _target_: training.common.buffer_utils.ExpertDataManager
+    capacity: ${training.buffer_size}
+  replay:
+    _target_: training.common.buffer_utils.ResidualReplayBuffer
+    capacity: ${training.buffer_size}
+  generator:
+    _target_: training.common.buffer_utils.GenWindowView
+    window_size: ${training.generator_window}
+
+name: sac_gail_residual
+
+logging:
+  project: ur5e_assemble
+  resume: true
+  mode: online
+  name: ${now:%Y.%m.%d-%H.%M.%S}_${name}
+  tags: [sac, gail, residual]
+  id: null
+  group: null
+
+hydra:
+  job:
+    override_dirname: ${name}
+  run:
+    dir: logs/outputs/${name}/${now:%Y.%m.%d}/${now:%H.%M.%S}
+  sweep:
+    dir: logs/outputs/${name}/${now:%Y.%m.%d}/${now:%H.%M.%S}
+    subdir: ${hydra.job.num}

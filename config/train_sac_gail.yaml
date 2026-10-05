@@ -1,0 +1,83 @@
+env:
+  num_envs: 4
+  max_episode_steps: 400
+
+trainer:
+  _target_: training.common.train_utils.GAILTrainer
+  seed: 1
+  total_timesteps: 500000
+  learning_starts: 1000
+  batch_size: 256
+  policy_updates: 1
+  target_update_interval: 1
+  policy_lr_min_ratio: 0.3
+  disc_lr_min_ratio: 0.1
+  eval_interval: 5000
+  eval_episodes: 10
+  final_eval_episodes: 30
+  log_interval: 100
+  disc_updates: 2
+  disc_batch_size: 256
+  env_reward_weight: 0.3
+  gail_reward_coef: 1.0
+  success_reward: 100.0
+  is_save_model: true
+
+training:
+  seed: ${trainer.seed}      # set_seed 用
+  buffer_size: 200000         # buffers.replay.capacity 用
+  generator_window: 50000    # buffers.generator.window_size 用
+
+policy:
+  _target_: training.policy.sac_policy.SACPolicy
+  hidden_dim: [256, 256]
+  actor_lr: 3e-4
+  critic_lr: 3e-4
+  alpha_lr: 3e-4
+  gamma: 0.99
+  tau: 0.005
+  alpha: 0.2
+  alpha_min: 0.08
+  target_entropy: -3.0
+  log_std_init: -3.0
+  autotune: true
+  use_sde: true
+
+discriminator:
+  _target_: training.policy.discriminator_policy.Discriminator
+  hidden_dim: [128, 128]
+  lr: 1e-4
+  smoothing: 0.05
+  ent_reg_scale: 0.001
+  grad_clip_norm: 1.0
+
+buffers:
+  expert:
+    _target_: training.common.buffer_utils.ExpertDataManager
+    capacity: ${training.buffer_size}
+  replay:
+    _target_: training.common.buffer_utils.ReplayBuffer
+    capacity: ${training.buffer_size}
+  generator:
+    _target_: training.common.buffer_utils.GenWindowView
+    window_size: ${training.generator_window}
+
+name: sac_gail
+
+logging:
+  project: ur5e_assemble
+  resume: true
+  mode: online
+  name: ${now:%Y.%m.%d-%H.%M.%S}_${name}
+  tags: [sac, gail]
+  id: null
+  group: null
+
+hydra:
+  job:
+    override_dirname: ${name}
+  run:
+    dir: logs/outputs/${name}/${now:%Y.%m.%d}/${now:%H.%M.%S}
+  sweep:
+    dir: logs/outputs/${name}/${now:%Y.%m.%d}/${now:%H.%M.%S}
+    subdir: ${hydra.job.num}

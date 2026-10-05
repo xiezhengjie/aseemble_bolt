@@ -3,10 +3,10 @@ import sys, os, numpy as np
 sys.path.insert(0, "/tmp/work/training")
 from pathlib import Path
 from envs.assemble_mujoco_env import AssembleMuJoCoEnv
-from utils.math_utils import rotmat_to_quat
+from training.common.math_utils import rotmat_to_quat
 root = Path("/tmp/work")
-env = AssembleMuJoCoEnv(xml_path=str(root/"mjcf/ur5e_assemble_sence.xml"),
-                        urdf_path=str(root/"urdf/ur5e_assemble.urdf"),
+env = AssembleMuJoCoEnv(xml_path=str(root/"assets/mjcf/ur5e_assemble_sence.xml"),
+                        urdf_path=str(root/"assets/urdf/ur5e_assemble.urdf"),
                         render_mode=None, max_episodic_steps=400)
 env.reset(seed=123)
 ctl = env.ur5e_controller

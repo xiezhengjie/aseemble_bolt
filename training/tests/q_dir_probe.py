@@ -7,11 +7,12 @@
 import sys, numpy as np, torch as th
 sys.path.insert(0, "/tmp/work/training")
 from pathlib import Path
-from algorithm.residual_sac import ResidualSAC
+from training.model.gail.residual_sac import ResidualSACAgent
+from training.common.policy_utils import current_frame
 
 ckpt = sys.argv[1]
 root_dir = Path("/tmp/work")
-agent = ResidualSAC(base_model_dir=root_dir/"models"/"bc_model_ur5e",
+agent = ResidualSACAgent(base_model_dir=root_dir/"models"/"bc_model_ur5e",
                     raw_obs_dim=10, action_dim=6, seq_len=8, gru_hidden_dim=64,
                     action_low=-np.ones(6), action_high=np.ones(6),
                     hidden_dim=(512,512), residual_scale=0.05, device=th.device("cpu"))
@@ -41,7 +42,7 @@ for (a0,a1) in eps:
     ht = th.as_tensor(agent.base_hidden_batch(st)); stt = th.as_tensor(st)
     with th.no_grad():
         h_n = agent.base_hidden(stt); a_base = agent.base_action(stt, h_n)
-        s_cur = agent._s_frame(stt)
+        s_cur = current_frame(stt, agent.seq_len, agent.raw_obs_dim)
     d = (np.clip(A[idx],-1,1) - a_base.numpy().reshape(-1))
     nd = np.linalg.norm(d)
     if nd < 1e-6: continue
@@ -50,8 +51,10 @@ for (a0,a1) in eps:
     qd, qr = [], []
     with th.no_grad():
         for t in ts:
-            qd.append(float(agent.critic_1(s_cur, ht, th.as_tensor((t*d).reshape(1,-1)).float())))
-            qr.append(float(agent.critic_1(s_cur, ht, th.as_tensor((t*r).reshape(1,-1)).float())))
+            qd_action = th.as_tensor((t*d).reshape(1,-1)).float()
+            qr_action = th.as_tensor((t*r).reshape(1,-1)).float()
+            qd.append(float(agent.critic_1(s_cur, qd_action, cond=ht)))
+            qr.append(float(agent.critic_1(s_cur, qr_action, cond=ht)))
     qd = np.array(qd); qr = np.array(qr)
     slope_d.append((qd[-1]-qd[0])/0.1)   # ΔQ/Δt 沿专家方向
     slope_r.append((qr[-1]-qr[0])/0.1)

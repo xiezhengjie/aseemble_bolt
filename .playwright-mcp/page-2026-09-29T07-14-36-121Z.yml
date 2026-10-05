@@ -1,0 +1,3767 @@
+- generic [ref=f9e2]:
+  - article [ref=f9e4]:
+    - heading "A Pragmatic Look at Deep Imitation Learning" [level=1] [ref=f9e5]
+    - generic [ref=f9e6]:
+      - generic [ref=f9e7]:
+        - generic [ref=f9e8]: Kai Arulkumaran
+        - link "kai_arulkumaran@araya.org" [ref=f9e12] [cursor=pointer]:
+          - /url: mailto:kai_arulkumaran@araya.org
+      - generic [ref=f9e13]:
+        - generic [ref=f9e14]: Dan Ogawa Lillrank
+        - generic [ref=f9e16]:
+          - link "dan_ogawa@araya.org" [ref=f9e18] [cursor=pointer]:
+            - /url: mailto:dan_ogawa@araya.org
+          - generic [ref=f9e19]: Araya Inc., Tokyo, Japan
+    - generic [ref=f9e20]:
+      - heading "Abstract" [level=6] [ref=f9e21]
+      - paragraph [ref=f9e22]: The introduction of the generative adversarial imitation learning (GAIL) algorithm has spurred the development of scalable imitation learning approaches using deep neural networks. Many of the algorithms that followed used a similar procedure, combining on-policy actor-critic algorithms with inverse reinforcement learning. More recently there have been an even larger breadth of approaches, most of which use off-policy algorithms. However, with the breadth of algorithms, everything from datasets to base reinforcement learning algorithms to evaluation settings can vary, making it difficult to fairly compare them. In this work we re-implement 6 different IL algorithms, updating 3 of them to be off-policy, base them on a common off-policy algorithm (SAC), and evaluate them on a widely-used expert trajectory dataset (D4RL) for the most common benchmark (MuJoCo). After giving all algorithms the same hyperparameter optimisation budget, we compare their results for a range of expert trajectories. In summary, GAIL, with all of its improvements, consistently performs well across a range of sample sizes, AdRIL is a simple contender that performs well with one important hyperparameter to tune, and behavioural cloning remains a strong baseline when data is more plentiful.
+    - superscript [ref=f9e24]: †
+    - superscript [ref=f9e26]: †
+    - superscript [ref=f9e28]: †
+    - generic [ref=f9e29]:
+      - heading "keywords:" [level=6] [ref=f9e30]
+      - text: imitation learning; inverse reinforcement learning; benchmarking
+    - generic [ref=f9e31]:
+      - heading "1 Introduction" [level=2] [ref=f9e32]:
+        - generic [ref=f9e33]: "1"
+        - text: Introduction
+      - paragraph [ref=f9e35]:
+        - text: Several years ago,
+        - link "Henderson et al. 2018" [ref=f9e37] [cursor=pointer]:
+          - /url: "#bib.bib25"
+        - text: formally brought attention to the reproducibility crisis in deep reinforcement learning (DRL). Some solutions have been to settle on evaluation protocols for common benchmarks
+        - generic [ref=f9e38]:
+          - text: (
+          - link "Machado et al. 2018" [ref=f9e39] [cursor=pointer]:
+            - /url: "#bib.bib37"
+          - text: )
+        - text: ", improving the statistical tools with which we evaluate results"
+        - generic [ref=f9e40]:
+          - text: (
+          - link "Agarwal et al. 2021" [ref=f9e41] [cursor=pointer]:
+            - /url: "#bib.bib1"
+          - text: )
+        - text: ", or simply just providing reliable algorithm implementations"
+        - generic [ref=f9e42]:
+          - text: (
+          - link "Raffin et al. 2021" [ref=f9e43] [cursor=pointer]:
+            - /url: "#bib.bib48"
+          - text: )
+        - text: . Still, sometimes it is necessary to take a step back and evaluate the (claimed) progress within different areas of machine learning
+        - generic [ref=f9e44]:
+          - text: (
+          - link "Oliver et al. 2018" [ref=f9e45] [cursor=pointer]:
+            - /url: "#bib.bib42"
+          - text: ;
+          - link "Musgrave et al. 2020" [ref=f9e46] [cursor=pointer]:
+            - /url: "#bib.bib39"
+          - text: ", ML;)"
+        - text: . In on-policy RL it has already been observed that implementation details can matter more than the algorithmic contributions of novel algorithms
+        - generic [ref=f9e47]:
+          - text: (
+          - link "Engstrom et al. 2020" [ref=f9e48] [cursor=pointer]:
+            - /url: "#bib.bib15"
+          - text: ;
+          - link "Andrychowicz et al. 2021" [ref=f9e49] [cursor=pointer]:
+            - /url: "#bib.bib2"
+          - text: )
+        - text: ", and so in turn we have opted to take a"
+        - emphasis [ref=f9e50]: pragmatic
+        - text: look at (deep) imitation learning (IL), creating a single, open source codebase to fairly compare algorithms.
+        - superscript [ref=f9e52]: "1"
+      - paragraph [ref=f9e54]:
+        - text: IL is the branch of ML that is concerned with learning from “demonstration” data
+        - generic [ref=f9e55]:
+          - text: (
+          - link "Hussein et al. 2017" [ref=f9e56] [cursor=pointer]:
+            - /url: "#bib.bib27"
+          - text: )
+        - text: . In other words, there exists agents, acting in environments, from which we collect data, in order to train our own agent. IL is intimately linked with RL—learning to act optimally in a given environment—and hence is often analysed with respect to concepts that are foundational to RL, such as states, actions, policies, reward functions, value functions, etc.
+        - generic [ref=f9e57]:
+          - text: (
+          - link "Sutton and Barto 2018" [ref=f9e58] [cursor=pointer]:
+            - /url: "#bib.bib53"
+          - text: )
+        - text: . Indeed, one of the most prominent approaches to IL is a technique known as inverse reinforcement learning
+        - generic [ref=f9e59]:
+          - text: (
+          - link "Arora and Doshi 2021" [ref=f9e60] [cursor=pointer]:
+            - /url: "#bib.bib3"
+          - text: ", IRL;)"
+        - text: .
+      - paragraph [ref=f9e62]:
+        - text: In the same way that deep learning (DL) has enabled RL to scale to high-dimensional state and action spaces
+        - generic [ref=f9e63]:
+          - text: (
+          - link "Arulkumaran et al. 2017" [ref=f9e64] [cursor=pointer]:
+            - /url: "#bib.bib4"
+          - text: )
+        - text: ", DL has also enabled IL to be applied to more complex domains. The most famous of these algorithms is generative adversarial IL"
+        - generic [ref=f9e65]:
+          - text: (
+          - link "Ho and Ermon 2016" [ref=f9e66] [cursor=pointer]:
+            - /url: "#bib.bib26"
+          - text: ", GAIL;)"
+        - text: ", which uses the generative adversarial framework"
+        - generic [ref=f9e67]:
+          - text: (
+          - link "Goodfellow et al. 2014" [ref=f9e68] [cursor=pointer]:
+            - /url: "#bib.bib21"
+          - text: )
+        - text: to learn a reward function which can then be used with IRL. In their work, they show strong results against a range of baselines, including the simplest IL method, behavioural cloning
+        - generic [ref=f9e69]:
+          - text: (
+          - link "Pomerleau 1988" [ref=f9e70] [cursor=pointer]:
+            - /url: "#bib.bib47"
+          - text: ", BC;)"
+        - text: . Although BC underperformed GAIL, they noted that it “was able to reach satisfactory performance with enough data”—a common observation. However, to “generate the datasets, … [they] subsampled the expert trajectories”. While this reduces the number of samples available, it is not the same as providing fewer trajectories without subsampling, as the former tends to result in better coverage of the state space.
+        - emphasis [ref=f9e71]: Pragmatically
+        - text: ", collecting trajectory data is a bottleneck for IL, so subsampling should be avoided---and in this case BC’s performance improves. IL results where trajectory data has been subsampled is not directly comparable to results where no subsampling has occurred, and unsurprisingly practitioners may miss critical details revealed in an appendix."
+        - superscript [ref=f9e73]: "2"
+      - paragraph [ref=f9e75]:
+        - text: Another major issue in the reproducibility of IL algorithms is encountered in the GAIL paper—they generated their own expert trajectories using an RL agent. Out of the works that we review herein, nearly all generate their own expert data. And naturally, as time passes, the RL algorithms used within IL algorithms get replaced with more performant versions. One of the most significant of these changes is the move from on-policy RL algorithms, as used within the original work on GAIL, to more data-efficient off-policy algorithms
+        - generic [ref=f9e76]:
+          - text: (
+          - link "Kostrikov et al. 2019" [ref=f9e77] [cursor=pointer]:
+            - /url: "#bib.bib32"
+          - text: ;
+          - link "Blondé and Kalousis 2019" [ref=f9e78] [cursor=pointer]:
+            - /url: "#bib.bib6"
+          - text: )
+        - text: . Do some of the on-policy IL algorithms that were competitive with GAIL
+        - generic [ref=f9e79]:
+          - text: (
+          - link "Kim and Park 2018" [ref=f9e80] [cursor=pointer]:
+            - /url: "#bib.bib31"
+          - text: ;
+          - link "Wang et al. 2019" [ref=f9e81] [cursor=pointer]:
+            - /url: "#bib.bib58"
+          - text: ;
+          - link "Brantley et al. 2020" [ref=f9e82] [cursor=pointer]:
+            - /url: "#bib.bib8"
+          - text: )
+        - text: still perform competitively when converted to be off-policy?
+      - paragraph [ref=f9e84]:
+        - text: "In this work, we review 6 different deep IL algorithms: GAIL"
+        - generic [ref=f9e85]:
+          - text: (
+          - link "Ho and Ermon 2016" [ref=f9e86] [cursor=pointer]:
+            - /url: "#bib.bib26"
+          - text: )
+        - text: ", generative moment matching imitation learning"
+        - generic [ref=f9e87]:
+          - text: (
+          - link "Kim and Park 2018" [ref=f9e88] [cursor=pointer]:
+            - /url: "#bib.bib31"
+          - text: ", GMMIL;)"
+        - text: ", random expert distillation"
+        - generic [ref=f9e89]:
+          - text: (
+          - link "Wang et al. 2019" [ref=f9e90] [cursor=pointer]:
+            - /url: "#bib.bib58"
+          - text: ", RED;)"
+        - text: ", disagreement-regularised imitation learning"
+        - generic [ref=f9e91]:
+          - text: (
+          - link "Brantley et al. 2020" [ref=f9e92] [cursor=pointer]:
+            - /url: "#bib.bib8"
+          - text: ", DRIL;)"
+        - text: ", adversarial reward-moment imitation learning"
+        - generic [ref=f9e93]:
+          - text: (
+          - link "Swamy et al. 2021" [ref=f9e94] [cursor=pointer]:
+            - /url: "#bib.bib54"
+          - text: ", AdRIL;)"
+        - text: ", and primal Wasserstein imitation learning"
+        - generic [ref=f9e95]:
+          - text: (
+          - link "Dadashi et al. 2021" [ref=f9e96] [cursor=pointer]:
+            - /url: "#bib.bib12"
+          - text: ", PWIL;)"
+        - text: . To minimise differences between them, we update GMMIL, RED, and DRIL to be off-policy, give them access to absorbing state indicators
+        - generic [ref=f9e97]:
+          - text: (
+          - link "Kostrikov et al. 2019" [ref=f9e98] [cursor=pointer]:
+            - /url: "#bib.bib32"
+          - text: )
+        - text: ", and use soft-actor critic"
+        - generic [ref=f9e99]:
+          - text: (
+          - link "Haarnoja et al. 2018a" [ref=f9e100] [cursor=pointer]:
+            - /url: "#bib.bib23"
+          - text: ", SAC;)"
+        - text: as the base RL algorithm for all methods. We then evaluate them on the standard MuJoCo continuous control benchmark environments
+        - generic [ref=f9e101]:
+          - text: (
+          - link "Todorov et al. 2012" [ref=f9e102] [cursor=pointer]:
+            - /url: "#bib.bib56"
+          - text: ;
+          - link "Brockman et al. 2016" [ref=f9e103] [cursor=pointer]:
+            - /url: "#bib.bib9"
+          - text: )
+        - text: ", using the D4RL expert trajectory datasets"
+        - generic [ref=f9e104]:
+          - text: (
+          - link "Fu et al. 2020" [ref=f9e105] [cursor=pointer]:
+            - /url: "#bib.bib18"
+          - text: )
+        - text: for reproducibility. For a fairer comparison, we give each algorithm the same hyperparameter optimisation budget, and then run them with the best settings for several seeds, and report results using current best practices
+        - generic [ref=f9e106]:
+          - text: (
+          - link "Agarwal et al. 2021" [ref=f9e107] [cursor=pointer]:
+            - /url: "#bib.bib1"
+          - text: )
+        - text: . Given the many improvements to GAIL, as well as prior effort performing extensive hyperparameter tuning on adversarial IL methods
+        - generic [ref=f9e108]:
+          - text: (
+          - link "Orsini et al. 2021" [ref=f9e109] [cursor=pointer]:
+            - /url: "#bib.bib43"
+          - text: )
+        - text: ", unsurprisingly it remains one of the best IL algorithms to use. With more trajectories, AdRIL performs similarly to GAIL, whilst remaining simple to implement and tune (unlike GAIL). And, as observed many times before, BC becomes a competitive baseline with enough data."
+    - generic [ref=f9e110]:
+      - heading "2 Background" [level=2] [ref=f9e111]:
+        - generic [ref=f9e112]: "2"
+        - text: Background
+      - generic [ref=f9e113]:
+        - heading "2.1 Imitation Learning" [level=3] [ref=f9e114]:
+          - generic [ref=f9e115]: "2.1"
+          - text: Imitation Learning
+        - paragraph [ref=f9e117]:
+          - text: The goal of IL is to train a policy
+          - superscript [ref=f9e119]: "3"
+          - text: ","
+          - math [ref=f9e120]:
+            - generic [ref=f9e122]:
+              - generic [ref=f9e123]:
+                - generic [ref=f9e124]: π
+                - generic [ref=f9e125]: ^
+              - generic [ref=f9e126]:
+                - generic [ref=f9e127]: (
+                - generic [ref=f9e128]: a
+                - generic [ref=f9e129]: "|"
+                - generic [ref=f9e130]:
+                  - generic [ref=f9e131]: s
+                  - generic [ref=f9e132]: ;
+                  - generic [ref=f9e133]: θ
+                - generic [ref=f9e134]: )
+          - text: ", mapping states"
+          - math [ref=f9e135]:
+            - generic [ref=f9e136]: s
+          - text: to a distribution over actions
+          - math [ref=f9e138]:
+            - generic [ref=f9e139]: a
+          - text: ", to mimic an expert policy"
+          - math [ref=f9e141]:
+            - generic [ref=f9e143]:
+              - generic [ref=f9e144]:
+                - generic [ref=f9e145]: π
+                - generic [ref=f9e146]: ∗
+              - generic [ref=f9e147]:
+                - generic [ref=f9e148]: (
+                - generic [ref=f9e149]: a
+                - generic [ref=f9e150]: "|"
+                - generic [ref=f9e151]: s
+                - generic [ref=f9e152]: )
+          - text: ", given either the expert policy itself, or more commonly, a fixed dataset"
+          - math [ref=f9e153]:
+            - generic [ref=f9e155]:
+              - generic [ref=f9e156]:
+                - generic [ref=f9e157]: ξ
+                - generic [ref=f9e158]: ∗
+              - generic [ref=f9e159]: =
+              - generic [ref=f9e160]:
+                - generic [ref=f9e161]: "{"
+                - generic [ref=f9e162]:
+                  - generic [ref=f9e163]: τ
+                  - generic [ref=f9e164]: "1"
+                - generic [ref=f9e165]: ","
+                - generic [ref=f9e166]: …
+                - generic [ref=f9e167]: ","
+                - generic [ref=f9e168]:
+                  - generic [ref=f9e169]: τ
+                  - generic [ref=f9e170]: "N"
+                - generic [ref=f9e171]: "}"
+          - text: ", of trajectories"
+          - math [ref=f9e172]:
+            - generic [ref=f9e174]:
+              - generic [ref=f9e175]: τ
+              - generic [ref=f9e176]: =
+              - generic [ref=f9e177]:
+                - generic [ref=f9e178]: "{"
+                - generic [ref=f9e179]:
+                  - generic [ref=f9e180]:
+                    - generic [ref=f9e181]: s
+                    - generic [ref=f9e182]: "0"
+                  - generic [ref=f9e183]: ","
+                  - generic [ref=f9e184]:
+                    - generic [ref=f9e185]: a
+                    - generic [ref=f9e186]: "0"
+                  - generic [ref=f9e187]: ","
+                  - generic [ref=f9e188]:
+                    - generic [ref=f9e189]: s
+                    - generic [ref=f9e190]: "1"
+                  - generic [ref=f9e191]: ","
+                  - generic [ref=f9e192]:
+                    - generic [ref=f9e193]: a
+                    - generic [ref=f9e194]: "1"
+                  - generic [ref=f9e195]: ","
+                  - generic [ref=f9e196]:
+                    - generic [ref=f9e197]: …
+                    - generic [ref=f9e198]:
+                      - generic [ref=f9e199]: s
+                      - generic [ref=f9e200]: T
+                  - generic [ref=f9e201]: ","
+                  - generic [ref=f9e202]:
+                    - generic [ref=f9e203]: a
+                    - generic [ref=f9e204]: T
+                - generic [ref=f9e205]: "}"
+          - text: generated by the expert, where
+          - math [ref=f9e206]:
+            - generic [ref=f9e207]: "N"
+          - text: denotes the number of expert trajectories provided.
+        - paragraph [ref=f9e210]:
+          - text: A common assumption within IL is that both the expert and our agent inhabit a Markov decision process (MDP), defined by the tuple
+          - math [ref=f9e211]:
+            - generic [ref=f9e213]:
+              - generic [ref=f9e214]: (
+              - generic [ref=f9e215]: 𝒮
+              - generic [ref=f9e216]: ","
+              - generic [ref=f9e217]: 𝒜
+              - generic [ref=f9e218]: ","
+              - generic [ref=f9e219]: 𝒯
+              - generic [ref=f9e220]: ","
+              - generic [ref=f9e221]: ℛ
+              - generic [ref=f9e222]: ","
+              - generic [ref=f9e223]:
+                - generic [ref=f9e224]: p
+                - generic [ref=f9e225]: "0"
+              - generic [ref=f9e226]: ","
+              - generic [ref=f9e227]: γ
+              - generic [ref=f9e228]: )
+          - text: ":"
+          - math [ref=f9e229]:
+            - generic [ref=f9e230]: 𝒮
+          - text: and
+          - math [ref=f9e232]:
+            - generic [ref=f9e233]: 𝒜
+          - text: are the state and action spaces,
+          - math [ref=f9e235]:
+            - generic [ref=f9e237]:
+              - generic [ref=f9e238]: 𝒯
+              - generic [ref=f9e239]: ":"
+              - generic [ref=f9e240]:
+                - generic [ref=f9e241]:
+                  - generic [ref=f9e242]: 𝒮
+                  - generic [ref=f9e243]: ×
+                  - generic [ref=f9e244]: 𝒜
+                - generic [ref=f9e245]: →
+                - generic [ref=f9e246]: 𝒮
+          - text: is the state transition dynamics,
+          - math [ref=f9e247]:
+            - generic [ref=f9e249]:
+              - generic [ref=f9e250]: ℛ
+              - generic [ref=f9e251]: ":"
+              - generic [ref=f9e252]:
+                - generic [ref=f9e253]:
+                  - generic [ref=f9e254]: 𝒮
+                  - generic [ref=f9e255]: ×
+                  - generic [ref=f9e256]: 𝒜
+                - generic [ref=f9e257]: →
+                - generic [ref=f9e258]: ℝ
+          - text: is the reward function,
+          - math [ref=f9e259]:
+            - generic [ref=f9e261]:
+              - generic [ref=f9e262]:
+                - generic [ref=f9e263]: p
+                - generic [ref=f9e264]: "0"
+              - generic [ref=f9e265]:
+                - generic [ref=f9e266]: (
+                - generic [ref=f9e267]: s
+                - generic [ref=f9e268]: )
+          - text: is the initial state distribution, and
+          - math [ref=f9e269]:
+            - generic [ref=f9e271]:
+              - generic [ref=f9e272]: γ
+              - generic [ref=f9e273]: ∈
+              - generic [ref=f9e274]:
+                - generic [ref=f9e275]: "["
+                - generic [ref=f9e276]:
+                  - generic [ref=f9e277]: "0"
+                  - generic [ref=f9e278]: ","
+                  - generic [ref=f9e279]: "1"
+                - generic [ref=f9e280]: "]"
+          - text: is the discount factor (used to weight immediate vs. future rewards). The expert policy is optimal in the sense that
+          - math [ref=f9e281]:
+            - generic [ref=f9e283]:
+              - generic [ref=f9e284]:
+                - generic [ref=f9e285]: π
+                - generic [ref=f9e286]: ∗
+              - generic [ref=f9e287]: =
+              - generic [ref=f9e288]:
+                - generic [ref=f9e289]:
+                  - generic [ref=f9e290]: arg
+                  - generic: ⁡
+                  - generic [ref=f9e291]:
+                    - generic [ref=f9e292]: max
+                    - generic [ref=f9e293]:
+                      - generic [ref=f9e294]: π
+                      - generic [ref=f9e295]: ∈
+                      - generic [ref=f9e296]: Π
+                - generic [ref=f9e297]:
+                  - generic [ref=f9e298]: 𝔼
+                  - generic [ref=f9e299]:
+                    - generic [ref=f9e300]: τ
+                    - generic [ref=f9e301]: ∼
+                    - generic [ref=f9e302]: π
+                - generic [ref=f9e303]:
+                  - generic [ref=f9e304]: "["
+                  - generic [ref=f9e305]:
+                    - generic [ref=f9e306]: R
+                    - generic [ref=f9e307]: "0"
+                  - generic [ref=f9e308]: "]"
+          - text: ", where the return at timestep"
+          - math [ref=f9e309]:
+            - generic [ref=f9e310]: t
+          - text: ","
+          - math [ref=f9e312]:
+            - generic [ref=f9e314]:
+              - generic [ref=f9e315]: R
+              - generic [ref=f9e316]: t
+          - text: ", is the discounted sum of rewards following a policy from state"
+          - math [ref=f9e317]:
+            - generic [ref=f9e319]:
+              - generic [ref=f9e320]: s
+              - generic [ref=f9e321]: t
+          - text: until the end of the episode at timestep
+          - math [ref=f9e322]:
+            - generic [ref=f9e323]: T
+          - text: ":"
+          - math [ref=f9e325]:
+            - generic [ref=f9e327]:
+              - generic [ref=f9e328]:
+                - generic [ref=f9e329]: R
+                - generic [ref=f9e330]: t
+              - generic [ref=f9e331]: =
+              - generic [ref=f9e332]:
+                - generic [ref=f9e333]:
+                  - generic [ref=f9e334]: ∑
+                  - generic [ref=f9e335]:
+                    - generic [ref=f9e336]: k
+                    - generic [ref=f9e337]: =
+                    - generic [ref=f9e338]: "0"
+                  - generic [ref=f9e339]:
+                    - generic [ref=f9e340]: T
+                    - generic [ref=f9e341]: −
+                    - generic [ref=f9e342]: t
+                - generic [ref=f9e343]:
+                  - generic [ref=f9e344]:
+                    - generic [ref=f9e345]: γ
+                    - generic [ref=f9e346]: k
+                  - generic [ref=f9e347]:
+                    - generic [ref=f9e348]: r
+                    - generic [ref=f9e349]:
+                      - generic [ref=f9e350]: t
+                      - generic [ref=f9e351]: +
+                      - generic [ref=f9e352]: k
+                      - generic [ref=f9e353]: +
+                      - generic [ref=f9e354]: "1"
+          - text: . While in RL the goal is to interact with the environment in order to find
+          - math [ref=f9e355]:
+            - generic [ref=f9e357]:
+              - generic [ref=f9e358]: π
+              - generic [ref=f9e359]: ∗
+          - generic [ref=f9e360]:
+            - text: (
+            - link "Sutton and Barto 2018" [ref=f9e361] [cursor=pointer]:
+              - /url: "#bib.bib53"
+            - text: )
+          - text: ", in IL we do not have access to"
+          - math [ref=f9e362]:
+            - generic [ref=f9e363]: ℛ
+          - text: ", and must instead find"
+          - math [ref=f9e365]:
+            - generic [ref=f9e367]:
+              - generic [ref=f9e368]: π
+              - generic [ref=f9e369]: ∗
+          - text: assuming that we have access to optimal trajectories.
+          - superscript [ref=f9e371]: "4"
+          - text: All following methods, unless specified otherwise, can be implemented using neural networks, providing flexible function approximation that can scale to large state and/or action spaces.
+      - generic [ref=f9e372]:
+        - heading "2.2 Reduction to Supervised Learning" [level=3] [ref=f9e373]:
+          - generic [ref=f9e374]: "2.2"
+          - text: Reduction to Supervised Learning
+        - generic [ref=f9e375]:
+          - paragraph [ref=f9e376]:
+            - text: The simplest method, BC
+            - generic [ref=f9e377]:
+              - text: (
+              - link "Pomerleau 1988" [ref=f9e378] [cursor=pointer]:
+                - /url: "#bib.bib47"
+              - text: )
+            - text: ", reduces IL to a supervised learning problem. Using"
+            - math [ref=f9e379]:
+              - generic [ref=f9e381]:
+                - generic [ref=f9e382]: a
+                - generic [ref=f9e383]: ∗
+            - text: "to denote the expert’s actions, BC can be formulated as minimising the 1-step deviation from the expert trajectories:"
+          - table [ref=f9e384]:
+            - rowgroup [ref=f9e385]:
+              - row [ref=f9e386]:
+                - cell [ref=f9e387]
+                - cell [ref=f9e388]:
+                  - math [ref=f9e389]:
+                    - generic [ref=f9e391]:
+                      - generic [ref=f9e392]:
+                        - generic [ref=f9e393]:
+                          - generic [ref=f9e394]: arg
+                          - generic: ⁡
+                          - generic [ref=f9e395]:
+                            - generic [ref=f9e396]: min
+                            - generic [ref=f9e397]: θ
+                        - generic [ref=f9e398]:
+                          - generic [ref=f9e399]: 𝔼
+                          - generic [ref=f9e400]:
+                            - generic [ref=f9e401]: s
+                            - generic [ref=f9e402]: ","
+                            - generic [ref=f9e403]:
+                              - generic [ref=f9e404]:
+                                - generic [ref=f9e405]: a
+                                - generic [ref=f9e406]: ∗
+                              - generic [ref=f9e407]: ∼
+                              - generic [ref=f9e408]:
+                                - generic [ref=f9e409]: ξ
+                                - generic [ref=f9e410]: ∗
+                        - generic [ref=f9e411]:
+                          - generic [ref=f9e412]: "["
+                          - generic [ref=f9e413]:
+                            - generic [ref=f9e414]: ℒ
+                            - generic: ⁡
+                            - generic [ref=f9e415]:
+                              - generic [ref=f9e416]: (
+                              - generic [ref=f9e417]:
+                                - generic [ref=f9e418]: a
+                                - generic [ref=f9e419]: ∗
+                              - generic [ref=f9e420]: ","
+                              - generic [ref=f9e421]:
+                                - generic [ref=f9e422]:
+                                  - generic [ref=f9e423]: π
+                                  - generic [ref=f9e424]: ^
+                                - generic [ref=f9e425]:
+                                  - generic [ref=f9e426]: (
+                                  - generic [ref=f9e427]: a
+                                  - generic [ref=f9e428]: "|"
+                                  - generic [ref=f9e429]:
+                                    - generic [ref=f9e430]: s
+                                    - generic [ref=f9e431]: ;
+                                    - generic [ref=f9e432]: θ
+                                  - generic [ref=f9e433]: )
+                              - generic [ref=f9e434]: )
+                          - generic [ref=f9e435]: "]"
+                      - generic [ref=f9e436]: ","
+                - cell [ref=f9e437]
+                - cell "(1)" [ref=f9e438]
+          - paragraph [ref=f9e440]:
+            - text: where
+            - math [ref=f9e441]:
+              - generic [ref=f9e442]: ℒ
+            - text: can be, as in maximum likelihood estimation, the negative log likelihood.
+        - paragraph [ref=f9e445]:
+          - text: BC is very simple, and benefits from a fixed objective over a stationary data distribution. However, as
+          - math [ref=f9e446]:
+            - generic [ref=f9e448]:
+              - generic [ref=f9e449]: π
+              - generic [ref=f9e450]: ^
+          - text: is only trained on
+          - math [ref=f9e451]:
+            - generic [ref=f9e453]:
+              - generic [ref=f9e454]: s
+              - generic [ref=f9e455]: ∼
+              - generic [ref=f9e456]:
+                - generic [ref=f9e457]: ξ
+                - generic [ref=f9e458]: ∗
+          - text: ", it can fail catastrophically when it diverges from the states covered by"
+          - math [ref=f9e459]:
+            - generic [ref=f9e461]:
+              - generic [ref=f9e462]: π
+              - generic [ref=f9e463]: ∗
+          - text: . In order to mitigate this,
+          - math [ref=f9e464]:
+            - generic [ref=f9e466]:
+              - generic [ref=f9e467]: π
+              - generic [ref=f9e468]: ^
+          - text: must be evaluated on the environment in order to correct for discrepancies between
+          - math [ref=f9e469]:
+            - generic [ref=f9e471]:
+              - generic [ref=f9e472]:
+                - generic [ref=f9e473]: s
+                - generic [ref=f9e474]: ","
+                - generic [ref=f9e475]: a
+              - generic [ref=f9e476]: ∼
+              - generic [ref=f9e477]:
+                - generic [ref=f9e478]: π
+                - generic [ref=f9e479]: ^
+          - text: and
+          - math [ref=f9e480]:
+            - generic [ref=f9e482]:
+              - generic [ref=f9e483]:
+                - generic [ref=f9e484]: s
+                - generic [ref=f9e485]: ","
+                - generic [ref=f9e486]: a
+              - generic [ref=f9e487]: ∼
+              - generic [ref=f9e488]:
+                - generic [ref=f9e489]: π
+                - generic [ref=f9e490]: ∗
+          - text: .
+        - paragraph [ref=f9e492]:
+          - text: Interactive IL methods solve this issue of compounding errors
+          - generic [ref=f9e493]:
+            - text: (
+            - link "Ross et al. 2011" [ref=f9e494] [cursor=pointer]:
+              - /url: "#bib.bib51"
+            - text: )
+          - text: by iterating over running
+          - math [ref=f9e495]:
+            - generic [ref=f9e497]:
+              - generic [ref=f9e498]: π
+              - generic [ref=f9e499]: ^
+          - text: in the environment, calculating
+          - math [ref=f9e500]:
+            - generic [ref=f9e502]:
+              - generic [ref=f9e503]:
+                - generic [ref=f9e504]: π
+                - generic [ref=f9e505]: ∗
+              - generic [ref=f9e506]:
+                - generic [ref=f9e507]: (
+                - generic [ref=f9e508]: a
+                - generic [ref=f9e509]: "|"
+                - generic [ref=f9e510]: s
+                - generic [ref=f9e511]: )
+          - text: "on"
+          - math [ref=f9e512]:
+            - generic [ref=f9e514]:
+              - generic [ref=f9e515]: π
+              - generic [ref=f9e516]: ^
+          - text: ’s state distribution, and using supervised learning on the new data
+          - generic [ref=f9e517]:
+            - text: (
+            - link "Daumé et al. 2009" [ref=f9e518] [cursor=pointer]:
+              - /url: "#bib.bib13"
+            - text: ;
+            - link "Ross and Bagnell 2010" [ref=f9e519] [cursor=pointer]:
+              - /url: "#bib.bib50"
+            - text: ;
+            - link "Ross et al. 2011" [ref=f9e520] [cursor=pointer]:
+              - /url: "#bib.bib51"
+            - text: )
+          - text: . While these approaches solve the data distribution issue, they require access to an interactive expert during training, which may not be available in many scenarios.
+      - generic [ref=f9e521]:
+        - heading "2.3 Inverse Reinforcement Learning" [level=3] [ref=f9e522]:
+          - generic [ref=f9e523]: "2.3"
+          - text: Inverse Reinforcement Learning
+        - generic [ref=f9e524]:
+          - paragraph [ref=f9e525]:
+            - text: IRL instead overcomes this distribution shift by using RL to train
+            - math [ref=f9e526]:
+              - generic [ref=f9e528]:
+                - generic [ref=f9e529]: π
+                - generic [ref=f9e530]: ^
+            - text: to mimic
+            - math [ref=f9e531]:
+              - generic [ref=f9e533]:
+                - generic [ref=f9e534]: π
+                - generic [ref=f9e535]: ∗
+            - text: "in the environment. The procedure consists of iterating between the following two steps:"
+          - list [ref=f9e536]:
+            - listitem [ref=f9e537]:
+              - generic [ref=f9e538]: "1."
+              - paragraph [ref=f9e540]:
+                - text: Construct a reward function
+                - superscript [ref=f9e542]: "5"
+                - math [ref=f9e543]:
+                  - generic [ref=f9e545]:
+                    - generic [ref=f9e546]:
+                      - generic [ref=f9e547]: ℛ
+                      - generic [ref=f9e548]: ^
+                    - generic [ref=f9e549]:
+                      - generic [ref=f9e550]: (
+                      - generic [ref=f9e551]: s
+                      - generic [ref=f9e552]: ","
+                      - generic [ref=f9e553]: a
+                      - generic [ref=f9e554]: ","
+                      - generic [ref=f9e555]: ϕ
+                      - generic [ref=f9e556]: )
+                - text: using
+                - math [ref=f9e557]:
+                  - generic [ref=f9e559]:
+                    - generic [ref=f9e560]: ξ
+                    - generic [ref=f9e561]: ∗
+                - text: ", and optionally"
+                - math [ref=f9e562]:
+                  - generic [ref=f9e564]:
+                    - generic [ref=f9e565]: τ
+                    - generic [ref=f9e566]: ∼
+                    - generic [ref=f9e567]:
+                      - generic [ref=f9e568]: π
+                      - generic [ref=f9e569]: ^
+            - listitem [ref=f9e570]:
+              - generic [ref=f9e571]: "2."
+              - paragraph [ref=f9e573]:
+                - text: Train
+                - math [ref=f9e574]:
+                  - generic [ref=f9e576]:
+                    - generic [ref=f9e577]: π
+                    - generic [ref=f9e578]: ^
+                - text: using RL
+        - paragraph [ref=f9e580]:
+          - text: RL is more complicated than the typical supervised learning setting. In particular, as the policy evolves, the data distribution changes. In the case of IRL,
+          - math [ref=f9e581]:
+            - generic [ref=f9e583]:
+              - generic [ref=f9e584]: ℛ
+              - generic [ref=f9e585]: ^
+          - text: changing over time can introduce further non-stationarity.
+        - generic [ref=f9e586]:
+          - paragraph [ref=f9e587]: "The basic objective of IRL can be stated as:"
+          - table [ref=f9e588]:
+            - rowgroup [ref=f9e589]:
+              - row [ref=f9e590]:
+                - cell [ref=f9e591]
+                - cell [ref=f9e592]:
+                  - math [ref=f9e593]:
+                    - generic [ref=f9e595]:
+                      - generic [ref=f9e596]:
+                        - generic [ref=f9e597]:
+                          - generic [ref=f9e598]:
+                            - generic [ref=f9e599]: arg
+                            - generic: ⁡
+                            - generic [ref=f9e600]:
+                              - generic [ref=f9e601]: max
+                              - generic [ref=f9e602]: θ
+                          - generic [ref=f9e603]:
+                            - generic [ref=f9e604]: 𝔼
+                            - generic [ref=f9e605]:
+                              - generic [ref=f9e606]: τ
+                              - generic [ref=f9e607]: ∼
+                              - generic [ref=f9e608]:
+                                - generic [ref=f9e609]:
+                                  - generic [ref=f9e610]: π
+                                  - generic [ref=f9e611]: ^
+                                - generic [ref=f9e612]:
+                                  - generic [ref=f9e613]: (
+                                  - generic [ref=f9e614]: s
+                                  - generic [ref=f9e615]: ","
+                                  - generic [ref=f9e616]: a
+                                  - generic [ref=f9e617]: ","
+                                  - generic [ref=f9e618]: θ
+                                  - generic [ref=f9e619]: )
+                          - generic [ref=f9e620]:
+                            - generic [ref=f9e621]: "["
+                            - generic [ref=f9e622]:
+                              - generic [ref=f9e623]:
+                                - generic [ref=f9e624]: R
+                                - generic [ref=f9e625]: ^
+                              - generic [ref=f9e626]: "0"
+                            - generic [ref=f9e627]: "]"
+                        - generic [ref=f9e628]: such that
+                        - generic [ref=f9e629]:
+                          - generic [ref=f9e630]:
+                            - generic [ref=f9e631]: π
+                            - generic [ref=f9e632]: ∗
+                          - generic [ref=f9e633]: =
+                          - generic [ref=f9e634]:
+                            - generic [ref=f9e635]:
+                              - generic [ref=f9e636]: arg
+                              - generic: ⁡
+                              - generic [ref=f9e637]:
+                                - generic [ref=f9e638]: max
+                                - generic [ref=f9e639]:
+                                  - generic [ref=f9e640]: π
+                                  - generic [ref=f9e641]: ∈
+                                  - generic [ref=f9e642]: Π
+                            - generic [ref=f9e643]:
+                              - generic [ref=f9e644]: 𝔼
+                              - generic [ref=f9e645]:
+                                - generic [ref=f9e646]: τ
+                                - generic [ref=f9e647]: ∼
+                                - generic [ref=f9e648]: π
+                            - generic [ref=f9e649]:
+                              - generic [ref=f9e650]: "["
+                              - generic [ref=f9e651]:
+                                - generic [ref=f9e652]:
+                                  - generic [ref=f9e653]: R
+                                  - generic [ref=f9e654]: ^
+                                - generic [ref=f9e655]: "0"
+                              - generic [ref=f9e656]: "]"
+                      - generic [ref=f9e657]: ","
+                - cell [ref=f9e658]
+                - cell "(2)" [ref=f9e659]
+          - paragraph [ref=f9e661]:
+            - text: where
+            - math [ref=f9e662]:
+              - generic [ref=f9e664]:
+                - generic [ref=f9e665]: R
+                - generic [ref=f9e666]: ^
+            - text: is the return with respect to the learned reward function
+            - math [ref=f9e667]:
+              - generic [ref=f9e669]:
+                - generic [ref=f9e670]: ℛ
+                - generic [ref=f9e671]: ^
+            - text: . However, this is underspecified
+            - generic [ref=f9e672]:
+              - text: (
+              - link "Ng et al. 2000" [ref=f9e673] [cursor=pointer]:
+                - /url: "#bib.bib41"
+              - text: )
+            - text: ; e.g., any policy is trivially optimal for
+            - math [ref=f9e674]:
+              - generic [ref=f9e676]:
+                - generic [ref=f9e677]:
+                  - generic [ref=f9e678]: ℛ
+                  - generic [ref=f9e679]: ^
+                - generic [ref=f9e680]: =
+                - generic [ref=f9e681]: "0"
+            - text: . IRL algorithms therefore incorporate one or several of the following three properties.
+        - paragraph [ref=f9e683]:
+          - text: Firstly, one can match the state-action distribution under
+          - math [ref=f9e684]:
+            - generic [ref=f9e686]:
+              - generic [ref=f9e687]: π
+              - generic [ref=f9e688]: ∗
+          - text: ", known as the expert’s occupancy measure"
+          - math [ref=f9e689]:
+            - generic [ref=f9e691]:
+              - generic [ref=f9e692]:
+                - generic [ref=f9e693]: ρ
+                - generic [ref=f9e694]:
+                  - generic [ref=f9e695]: π
+                  - generic [ref=f9e696]: ∗
+              - generic [ref=f9e697]: =
+              - generic [ref=f9e698]:
+                - generic [ref=f9e699]:
+                  - generic [ref=f9e700]: 𝔼
+                  - generic [ref=f9e701]:
+                    - generic [ref=f9e702]: τ
+                    - generic [ref=f9e703]: ∼
+                    - generic [ref=f9e704]:
+                      - generic [ref=f9e705]: π
+                      - generic [ref=f9e706]: ∗
+                - generic [ref=f9e707]:
+                  - generic [ref=f9e708]: "["
+                  - generic [ref=f9e709]:
+                    - generic [ref=f9e710]:
+                      - generic [ref=f9e711]: ∑
+                      - generic [ref=f9e712]:
+                        - generic [ref=f9e713]: t
+                        - generic [ref=f9e714]: =
+                        - generic [ref=f9e715]: "0"
+                      - generic [ref=f9e716]: T
+                    - generic [ref=f9e717]:
+                      - generic [ref=f9e718]:
+                        - generic [ref=f9e719]: γ
+                        - generic [ref=f9e720]: t
+                      - generic [ref=f9e721]:
+                        - generic [ref=f9e722]: 𝟙
+                        - generic [ref=f9e723]:
+                          - generic [ref=f9e724]: s
+                          - generic [ref=f9e725]: ","
+                          - generic [ref=f9e726]: a
+                  - generic [ref=f9e727]: "]"
+          - generic [ref=f9e728]:
+            - text: (
+            - link "Syed et al. 2008" [ref=f9e729] [cursor=pointer]:
+              - /url: "#bib.bib55"
+            - text: ;
+            - link "Ho and Ermon 2016" [ref=f9e730] [cursor=pointer]:
+              - /url: "#bib.bib26"
+            - text: )
+          - text: ", or, alternatively, feature expectations"
+          - generic [ref=f9e731]:
+            - text: (
+            - link "Ng et al. 2000" [ref=f9e732] [cursor=pointer]:
+              - /url: "#bib.bib41"
+            - text: )
+          - text: . This is achieved using the learned reward function, and is hence dependent on the expressivity of
+          - math [ref=f9e733]:
+            - generic [ref=f9e735]:
+              - generic [ref=f9e736]: ℛ
+              - generic [ref=f9e737]: ^
+          - text: . In particular, the constant function is underspecified and allows an infinite set of solutions. Secondly, one can “penalise” following trajectories taken by (previous iterations of)
+          - math [ref=f9e738]:
+            - generic [ref=f9e740]:
+              - generic [ref=f9e741]: π
+              - generic [ref=f9e742]: ^
+          - generic [ref=f9e743]:
+            - text: (
+            - link "Ng et al. 2000" [ref=f9e744] [cursor=pointer]:
+              - /url: "#bib.bib41"
+            - text: )
+          - text: . This allows
+          - math [ref=f9e745]:
+            - generic [ref=f9e747]:
+              - generic [ref=f9e748]: ℛ
+              - generic [ref=f9e749]: ^
+          - text: to focus on relevant parts of the state-action space, but implicitly assumes that current/past versions of
+          - math [ref=f9e750]:
+            - generic [ref=f9e752]:
+              - generic [ref=f9e753]: π
+              - generic [ref=f9e754]: ^
+          - text: are suboptimal. Thirdly, one can use the maximum entropy principle
+          - generic [ref=f9e755]:
+            - text: (
+            - link "Jaynes 1957" [ref=f9e756] [cursor=pointer]:
+              - /url: "#bib.bib29"
+            - text: )
+          - text: to find a unique best solution out of the set of solutions that match the expert’s occupancy measure/feature expectations
+          - generic [ref=f9e757]:
+            - text: (
+            - link "Ziebart et al. 2008" [ref=f9e758] [cursor=pointer]:
+              - /url: "#bib.bib62"
+            - text: )
+          - text: . Using the Lagrangian multiplier
+          - math [ref=f9e759]:
+            - generic [ref=f9e760]: λ
+          - text: ", and denoting"
+          - math [ref=f9e762]:
+            - generic [ref=f9e763]: H
+          - text: "as the entropy, this results in the following modified RL objective:"
+          - math [ref=f9e765]:
+            - generic [ref=f9e767]:
+              - generic [ref=f9e768]:
+                - generic [ref=f9e769]:
+                  - generic [ref=f9e770]: arg
+                  - generic: ⁡
+                  - generic [ref=f9e771]:
+                    - generic [ref=f9e772]: max
+                    - generic [ref=f9e773]: θ
+                - generic [ref=f9e774]:
+                  - generic [ref=f9e775]: 𝔼
+                  - generic [ref=f9e776]:
+                    - generic [ref=f9e777]: τ
+                    - generic [ref=f9e778]: ∼
+                    - generic [ref=f9e779]:
+                      - generic [ref=f9e780]: π
+                      - generic: ⁡
+                      - generic [ref=f9e781]:
+                        - generic [ref=f9e782]: (
+                        - generic [ref=f9e783]: s
+                        - generic [ref=f9e784]: ","
+                        - generic [ref=f9e785]: a
+                        - generic [ref=f9e786]: ","
+                        - generic [ref=f9e787]: θ
+                        - generic [ref=f9e788]: )
+                - generic [ref=f9e789]:
+                  - generic [ref=f9e790]: "["
+                  - generic [ref=f9e791]:
+                    - generic [ref=f9e792]: R
+                    - generic [ref=f9e793]: "0"
+                  - generic [ref=f9e794]: "]"
+              - generic [ref=f9e795]: +
+              - generic [ref=f9e796]:
+                - generic [ref=f9e797]: λ
+                - generic [ref=f9e798]: H
+                - generic [ref=f9e799]:
+                  - generic [ref=f9e800]: "["
+                  - generic [ref=f9e801]:
+                    - generic [ref=f9e802]: π
+                    - generic: ⁡
+                    - generic [ref=f9e803]:
+                      - generic [ref=f9e804]: (
+                      - generic [ref=f9e805]: s
+                      - generic [ref=f9e806]: ","
+                      - generic [ref=f9e807]: a
+                      - generic [ref=f9e808]: ","
+                      - generic [ref=f9e809]: θ
+                      - generic [ref=f9e810]: )
+                  - generic [ref=f9e811]: "]"
+          - text: . Entropy regularisation is a classic technique in RL
+          - generic [ref=f9e812]:
+            - text: (
+            - link "Williams and Peng 1991" [ref=f9e813] [cursor=pointer]:
+              - /url: "#bib.bib59"
+            - text: )
+          - text: .
+        - generic [ref=f9e814]:
+          - paragraph [ref=f9e815]:
+            - text: A simple algorithm that uses these properties is soft Q imitation learning
+            - generic [ref=f9e816]:
+              - text: (
+              - link "Reddy et al. 2020" [ref=f9e817] [cursor=pointer]:
+                - /url: "#bib.bib49"
+              - text: ", SQIL;)"
+            - text: ". SQIL uses the constant reward function:"
+          - table [ref=f9e818]:
+            - rowgroup [ref=f9e819]:
+              - row [ref=f9e820]:
+                - cell [ref=f9e821]
+                - cell [ref=f9e822]:
+                  - math [ref=f9e823]:
+                    - generic [ref=f9e825]:
+                      - generic [ref=f9e826]:
+                        - generic [ref=f9e827]: ℛ
+                        - generic [ref=f9e828]: ^
+                      - generic [ref=f9e829]: =
+                      - generic [ref=f9e830]:
+                        - generic [ref=f9e831]: "{"
+                        - generic [ref=f9e832]:
+                          - generic [ref=f9e833]:
+                            - generic [ref=f9e834]: "1"
+                            - generic [ref=f9e837]:
+                              - generic [ref=f9e838]:
+                                - generic [ref=f9e839]: if
+                                - generic [ref=f9e840]:
+                                  - generic [ref=f9e841]: (
+                                  - generic [ref=f9e842]: s
+                                  - generic [ref=f9e843]: ","
+                                  - generic [ref=f9e844]: a
+                                  - generic [ref=f9e845]: )
+                              - generic [ref=f9e846]: ∈
+                              - generic [ref=f9e847]:
+                                - generic [ref=f9e848]: ξ
+                                - generic [ref=f9e849]: ∗
+                          - generic [ref=f9e850]:
+                            - generic [ref=f9e851]: "0"
+                            - generic [ref=f9e854]:
+                              - generic [ref=f9e855]:
+                                - generic [ref=f9e856]:
+                                  - generic [ref=f9e857]: if
+                                  - generic [ref=f9e858]:
+                                    - generic [ref=f9e859]: (
+                                    - generic [ref=f9e860]: s
+                                    - generic [ref=f9e861]: ","
+                                    - generic [ref=f9e862]: a
+                                    - generic [ref=f9e863]: )
+                                - generic [ref=f9e864]: ∼
+                                - generic [ref=f9e865]:
+                                  - generic [ref=f9e866]: π
+                                  - generic [ref=f9e867]: ^
+                              - generic [ref=f9e868]: ","
+                - cell [ref=f9e869]
+                - cell "(3)" [ref=f9e870]
+          - paragraph [ref=f9e872]:
+            - text: which encourages not just imitating the expert’s actions, but also visiting the same states. Building upon the maximum entropy model of expert behaviour
+            - generic [ref=f9e873]:
+              - text: (
+              - link "Ziebart et al. 2008" [ref=f9e874] [cursor=pointer]:
+                - /url: "#bib.bib62"
+              - text: )
+            - text: ","
+            - link "Reddy et al. 2020" [ref=f9e876] [cursor=pointer]:
+              - /url: "#bib.bib49"
+            - text: show that their algorithm can be interpreted as regularised BC with a sparsity penalty on the reward function
+            - generic [ref=f9e877]:
+              - text: (
+              - link "Piot et al. 2014" [ref=f9e878] [cursor=pointer]:
+                - /url: "#bib.bib46"
+              - text: )
+            - text: .
+            - superscript [ref=f9e880]: "6"
+            - text: The full SQIL algorithm (for continuous action spaces) trains a SAC agent on half-half mixed batches of expert and agent data with its constant reward function. While simple, the downside of the constant reward function is that as the agent improves, its transitions still get labelled with zero rewards, potentially leading to a collapse in performance with over-training.
+      - generic [ref=f9e881]:
+        - heading "2.4 Adversarial Imitation Learning" [level=3] [ref=f9e882]:
+          - generic [ref=f9e883]: "2.4"
+          - text: Adversarial Imitation Learning
+        - paragraph [ref=f9e885]:
+          - text: Adversarial IL methods instead learn a reward function online using adversarial training, motivated by maximum entropy occupancy measure matching
+          - generic [ref=f9e886]:
+            - text: (
+            - link "Ho and Ermon 2016" [ref=f9e887] [cursor=pointer]:
+              - /url: "#bib.bib26"
+            - text: )
+          - text: . In generative adversarial network training
+          - generic [ref=f9e888]:
+            - text: (
+            - link "Goodfellow et al. 2014" [ref=f9e889] [cursor=pointer]:
+              - /url: "#bib.bib21"
+            - text: )
+          - text: ", the “generator” is trained to output samples that fool the “discriminator”"
+          - math [ref=f9e890]:
+            - generic [ref=f9e892]:
+              - generic [ref=f9e893]: D
+              - generic [ref=f9e894]: ":"
+              - generic [ref=f9e895]:
+                - generic [ref=f9e896]:
+                  - generic [ref=f9e897]: 𝒮
+                  - generic [ref=f9e898]: ×
+                  - generic [ref=f9e899]: 𝒜
+                - generic [ref=f9e900]: →
+                - generic [ref=f9e901]:
+                  - generic [ref=f9e902]: (
+                  - generic [ref=f9e903]: "0"
+                  - generic [ref=f9e904]: ","
+                  - generic [ref=f9e905]: "1"
+                  - generic [ref=f9e906]: )
+          - text: ", whilst the discriminator is trained to discriminate between samples from the generator and the data distribution. This is a minimax game, in which the equilibrium solution corresponds to minimising the Jensen-Shannon divergence between the generated and real distributions. In GAIL,"
+          - math [ref=f9e907]:
+            - generic [ref=f9e909]:
+              - generic [ref=f9e910]: π
+              - generic [ref=f9e911]: ^
+          - text: plays the role of the generator, and the discriminator is trained on state-action pairs from
+          - math [ref=f9e912]:
+            - generic [ref=f9e914]:
+              - generic [ref=f9e915]: π
+              - generic [ref=f9e916]: ^
+          - text: and
+          - math [ref=f9e917]:
+            - generic [ref=f9e919]:
+              - generic [ref=f9e920]: π
+              - generic [ref=f9e921]: ∗
+          - text: ":"
+          - math [ref=f9e922]:
+            - generic [ref=f9e924]:
+              - generic [ref=f9e925]:
+                - generic [ref=f9e926]:
+                  - generic [ref=f9e927]:
+                    - generic [ref=f9e928]: min
+                    - generic [ref=f9e929]: G
+                  - generic: ⁡
+                  - generic [ref=f9e930]:
+                    - generic [ref=f9e931]: max
+                    - generic [ref=f9e932]: D
+                - generic [ref=f9e933]:
+                  - generic [ref=f9e934]: 𝔼
+                  - generic [ref=f9e935]:
+                    - generic [ref=f9e936]:
+                      - generic [ref=f9e937]: s
+                      - generic [ref=f9e938]: ","
+                      - generic [ref=f9e939]: a
+                    - generic [ref=f9e940]: ∼
+                    - generic [ref=f9e941]:
+                      - generic [ref=f9e942]: π
+                      - generic [ref=f9e943]: ∗
+                - generic [ref=f9e944]:
+                  - generic [ref=f9e945]: "["
+                  - generic [ref=f9e946]:
+                    - generic [ref=f9e947]: log
+                    - generic: ⁡
+                    - generic [ref=f9e948]:
+                      - generic [ref=f9e949]: (
+                      - generic [ref=f9e950]:
+                        - generic [ref=f9e951]: D
+                        - generic: ⁡
+                        - generic [ref=f9e952]:
+                          - generic [ref=f9e953]: (
+                          - generic [ref=f9e954]: s
+                          - generic [ref=f9e955]: ","
+                          - generic [ref=f9e956]: a
+                          - generic [ref=f9e957]: )
+                      - generic [ref=f9e958]: )
+                  - generic [ref=f9e959]: "]"
+              - generic [ref=f9e960]: +
+              - generic [ref=f9e961]:
+                - generic [ref=f9e962]:
+                  - generic [ref=f9e963]: 𝔼
+                  - generic [ref=f9e964]:
+                    - generic [ref=f9e965]:
+                      - generic [ref=f9e966]: s
+                      - generic [ref=f9e967]: ","
+                      - generic [ref=f9e968]: a
+                    - generic [ref=f9e969]: ∼
+                    - generic [ref=f9e970]:
+                      - generic [ref=f9e971]: π
+                      - generic [ref=f9e972]: ^
+                - generic [ref=f9e973]:
+                  - generic [ref=f9e974]: "["
+                  - generic [ref=f9e975]:
+                    - generic [ref=f9e976]: log
+                    - generic: ⁡
+                    - generic [ref=f9e977]:
+                      - generic [ref=f9e978]: (
+                      - generic [ref=f9e979]:
+                        - generic [ref=f9e980]: "1"
+                        - generic [ref=f9e981]: −
+                        - generic [ref=f9e982]:
+                          - generic [ref=f9e983]: D
+                          - generic: ⁡
+                          - generic [ref=f9e984]:
+                            - generic [ref=f9e985]: (
+                            - generic [ref=f9e986]: s
+                            - generic [ref=f9e987]: ","
+                            - generic [ref=f9e988]: a
+                            - generic [ref=f9e989]: )
+                      - generic [ref=f9e990]: )
+                  - generic [ref=f9e991]: "]"
+          - text: . Under this formulation, higher values indicate how “expert”
+          - math [ref=f9e992]:
+            - generic [ref=f9e993]: D
+          - text: believes its input to be.
+        - paragraph [ref=f9e996]:
+          - text: There are several options for constructing
+          - math [ref=f9e997]:
+            - generic [ref=f9e999]:
+              - generic [ref=f9e1000]: ℛ
+              - generic [ref=f9e1001]: ^
+          - text: from
+          - math [ref=f9e1002]:
+            - generic [ref=f9e1003]: D
+          - text: . Prominent examples include those introduced in GAIL, adversarial inverse reinforcement learning
+          - generic [ref=f9e1005]:
+            - text: (
+            - link "Fu et al. 2018" [ref=f9e1006] [cursor=pointer]:
+              - /url: "#bib.bib17"
+            - text: ", AIRL;)"
+          - text: (corresponding to the reverse Kullback-Leibler (KL) divergence
+          - math [ref=f9e1007]:
+            - generic [ref=f9e1009]:
+              - generic [ref=f9e1010]:
+                - generic [ref=f9e1011]: D
+                - generic [ref=f9e1012]: KL
+              - generic [ref=f9e1013]:
+                - generic [ref=f9e1014]: (
+                - generic [ref=f9e1015]:
+                  - generic [ref=f9e1016]: ρ
+                  - generic [ref=f9e1017]:
+                    - generic [ref=f9e1018]: π
+                    - generic [ref=f9e1019]: ^
+                - generic [ref=f9e1020]: ∥
+                - generic [ref=f9e1021]:
+                  - generic [ref=f9e1022]: ρ
+                  - generic [ref=f9e1023]:
+                    - generic [ref=f9e1024]: π
+                    - generic [ref=f9e1025]: ∗
+                - generic [ref=f9e1026]: )
+          - text: ), and forward KL AIRL
+          - generic [ref=f9e1027]:
+            - text: (
+            - link "Ghasemipour et al. 2020" [ref=f9e1028] [cursor=pointer]:
+              - /url: "#bib.bib20"
+            - text: ", FAIRL;)"
+          - text: (Table
+          - link "1" [ref=f9e1029] [cursor=pointer]:
+            - /url: "#S2.T1"
+          - text: ). As discussed by
+          - link "Kostrikov et al. 2019" [ref=f9e1031] [cursor=pointer]:
+            - /url: "#bib.bib32"
+          - text: and empirically investigated by
+          - link "Jena et al. 2020" [ref=f9e1033] [cursor=pointer]:
+            - /url: "#bib.bib30"
+          - text: ", there is a potential reward bias in these functions. They note that positive"
+          - math [ref=f9e1034]:
+            - generic [ref=f9e1036]:
+              - generic [ref=f9e1037]: ℛ
+              - generic [ref=f9e1038]: ^
+          - text: ", i.e.,"
+          - math [ref=f9e1039]:
+            - generic [ref=f9e1041]:
+              - generic [ref=f9e1042]: −
+              - generic [ref=f9e1043]:
+                - generic [ref=f9e1044]: log
+                - generic: ⁡
+                - generic [ref=f9e1045]:
+                  - generic [ref=f9e1046]: (
+                  - generic [ref=f9e1047]:
+                    - generic [ref=f9e1048]: "1"
+                    - generic [ref=f9e1049]: −
+                    - generic [ref=f9e1050]:
+                      - generic [ref=f9e1051]: D
+                      - generic: ⁡
+                      - generic [ref=f9e1052]:
+                        - generic [ref=f9e1053]: (
+                        - generic [ref=f9e1054]: s
+                        - generic [ref=f9e1055]: ","
+                        - generic [ref=f9e1056]: a
+                        - generic [ref=f9e1057]: )
+                  - generic [ref=f9e1058]: )
+          - text: ", biases agents towards survival, whereas negative"
+          - math [ref=f9e1059]:
+            - generic [ref=f9e1061]:
+              - generic [ref=f9e1062]: ℛ
+              - generic [ref=f9e1063]: ^
+          - text: ", i.e.,"
+          - math [ref=f9e1064]:
+            - generic [ref=f9e1066]:
+              - generic [ref=f9e1067]: log
+              - generic: ⁡
+              - generic [ref=f9e1068]:
+                - generic [ref=f9e1069]: (
+                - generic [ref=f9e1070]:
+                  - generic [ref=f9e1071]: D
+                  - generic: ⁡
+                  - generic [ref=f9e1072]:
+                    - generic [ref=f9e1073]: (
+                    - generic [ref=f9e1074]: s
+                    - generic [ref=f9e1075]: ","
+                    - generic [ref=f9e1076]: a
+                    - generic [ref=f9e1077]: )
+                - generic [ref=f9e1078]: )
+          - text: biases agents towards early termination. This bias means that even constant reward functions can outperform either of these depending on the type of the environment. We recommend the original works for discussions on the properties of various reward functions
+          - generic [ref=f9e1079]:
+            - text: (
+            - link "Kostrikov et al. 2019" [ref=f9e1080] [cursor=pointer]:
+              - /url: "#bib.bib32"
+            - text: ;
+            - link "Jena et al. 2020" [ref=f9e1081] [cursor=pointer]:
+              - /url: "#bib.bib30"
+            - text: ;
+            - link "Ghasemipour et al. 2020" [ref=f9e1082] [cursor=pointer]:
+              - /url: "#bib.bib20"
+            - text: )
+          - text: .
+          - link "Kostrikov et al. 2019" [ref=f9e1084] [cursor=pointer]:
+            - /url: "#bib.bib32"
+          - text: also make the observation that many IL algorithms do not correctly handle terminal states, and propose appending an absorbing state indicator to states, which allows IRL algorithms to properly estimate values for terminal states. This requires processing complete trajectories from both the expert and the agent, and allowing both the RL agent and the discriminator to learn from the indicator feature.
+        - 'figure "Table 1: Adversarial imitation reward functions ( Ghasemipour et al. 2020 )." [ref=f9e1085]':
+          - generic [ref=f9e1086]:
+            - generic [ref=f9e1087]: "Table 1:"
+            - text: Adversarial imitation reward functions
+            - generic [ref=f9e1088]:
+              - text: (
+              - link "Ghasemipour et al. 2020" [ref=f9e1089] [cursor=pointer]:
+                - /url: "#bib.bib20"
+              - text: )
+            - text: .
+          - table [ref=f9e1092]:
+            - rowgroup [ref=f9e1093]:
+              - row [ref=f9e1094]:
+                - columnheader [ref=f9e1095]
+                - columnheader [ref=f9e1096]:
+                  - math [ref=f9e1097]:
+                    - generic [ref=f9e1099]:
+                      - generic [ref=f9e1100]: ℛ
+                      - generic [ref=f9e1101]: ^
+                - columnheader "Positive (bounded)" [ref=f9e1102]
+                - columnheader "Negative (bounded)" [ref=f9e1103]
+            - rowgroup [ref=f9e1104]:
+              - row [ref=f9e1105]:
+                - columnheader "GAIL" [ref=f9e1106]
+                - rowheader [ref=f9e1107]:
+                  - math [ref=f9e1108]:
+                    - generic [ref=f9e1110]:
+                      - generic [ref=f9e1111]: log
+                      - generic: ⁡
+                      - generic [ref=f9e1112]:
+                        - generic [ref=f9e1113]: D
+                        - generic: ⁡
+                        - generic [ref=f9e1114]:
+                          - generic [ref=f9e1115]: (
+                          - generic [ref=f9e1116]: s
+                          - generic [ref=f9e1117]: ","
+                          - generic [ref=f9e1118]: a
+                          - generic [ref=f9e1119]: )
+                - cell "✗(-)" [ref=f9e1120]
+                - cell "✓(✗)" [ref=f9e1121]
+              - row [ref=f9e1122]:
+                - columnheader "AIRL" [ref=f9e1123]
+                - rowheader [ref=f9e1124]:
+                  - math [ref=f9e1125]:
+                    - generic [ref=f9e1127]:
+                      - generic [ref=f9e1128]:
+                        - generic [ref=f9e1129]: h
+                        - generic: ⁡
+                        - generic [ref=f9e1130]:
+                          - generic [ref=f9e1131]: (
+                          - generic [ref=f9e1132]: s
+                          - generic [ref=f9e1133]: ","
+                          - generic [ref=f9e1134]: a
+                          - generic [ref=f9e1135]: )
+                      - generic [ref=f9e1136]: =
+                      - generic [ref=f9e1137]:
+                        - generic [ref=f9e1138]:
+                          - generic [ref=f9e1139]: log
+                          - generic: ⁡
+                          - generic [ref=f9e1140]:
+                            - generic [ref=f9e1141]: (
+                            - generic [ref=f9e1142]:
+                              - generic [ref=f9e1143]: D
+                              - generic: ⁡
+                              - generic [ref=f9e1144]:
+                                - generic [ref=f9e1145]: (
+                                - generic [ref=f9e1146]: s
+                                - generic [ref=f9e1147]: ","
+                                - generic [ref=f9e1148]: a
+                                - generic [ref=f9e1149]: )
+                            - generic [ref=f9e1150]: )
+                        - generic [ref=f9e1151]: −
+                        - generic [ref=f9e1152]:
+                          - generic [ref=f9e1153]: log
+                          - generic: ⁡
+                          - generic [ref=f9e1154]:
+                            - generic [ref=f9e1155]: (
+                            - generic [ref=f9e1156]:
+                              - generic [ref=f9e1157]: "1"
+                              - generic [ref=f9e1158]: −
+                              - generic [ref=f9e1159]:
+                                - generic [ref=f9e1160]: D
+                                - generic: ⁡
+                                - generic [ref=f9e1161]:
+                                  - generic [ref=f9e1162]: (
+                                  - generic [ref=f9e1163]: s
+                                  - generic [ref=f9e1164]: ","
+                                  - generic [ref=f9e1165]: a
+                                  - generic [ref=f9e1166]: )
+                            - generic [ref=f9e1167]: )
+                - cell "✓(✗)" [ref=f9e1168]
+                - cell "✓(✗)" [ref=f9e1169]
+              - row [ref=f9e1170]:
+                - columnheader "FAIRL" [ref=f9e1171]
+                - rowheader [ref=f9e1172]:
+                  - math [ref=f9e1173]:
+                    - generic [ref=f9e1175]:
+                      - generic [ref=f9e1176]: −
+                      - generic [ref=f9e1177]: h
+                      - generic [ref=f9e1178]:
+                        - generic [ref=f9e1179]: (
+                        - generic [ref=f9e1180]: s
+                        - generic [ref=f9e1181]: ","
+                        - generic [ref=f9e1182]: a
+                        - generic [ref=f9e1183]: )
+                      - generic [ref=f9e1184]: ⋅
+                      - generic [ref=f9e1185]:
+                        - generic [ref=f9e1186]: e
+                        - generic [ref=f9e1187]:
+                          - generic [ref=f9e1188]: h
+                          - generic: ⁡
+                          - generic [ref=f9e1189]:
+                            - generic [ref=f9e1190]: (
+                            - generic [ref=f9e1191]: s
+                            - generic [ref=f9e1192]: ","
+                            - generic [ref=f9e1193]: a
+                            - generic [ref=f9e1194]: )
+                - cell "✓(✓)" [ref=f9e1195]
+                - cell "✓(✗)" [ref=f9e1196]
+        - paragraph [ref=f9e1198]:
+          - text: While GAIL implicitly returns a reward function, if trained to optimality then
+          - math [ref=f9e1199]:
+            - generic [ref=f9e1200]: D
+          - text: will return 0.5 for state-action pairs from both
+          - math [ref=f9e1202]:
+            - generic [ref=f9e1204]:
+              - generic [ref=f9e1205]: π
+              - generic [ref=f9e1206]: ^
+          - text: and
+          - math [ref=f9e1207]:
+            - generic [ref=f9e1209]:
+              - generic [ref=f9e1210]: π
+              - generic [ref=f9e1211]: ∗
+          - text: .
+          - link "Finn et al. 2016" [ref=f9e1213] [cursor=pointer]:
+            - /url: "#bib.bib16"
+          - text: propose changing the form of the
+          - math [ref=f9e1214]:
+            - generic [ref=f9e1215]: D
+          - text: to
+          - math [ref=f9e1217]:
+            - generic [ref=f9e1219]:
+              - generic [ref=f9e1220]:
+                - generic [ref=f9e1221]: exp
+                - generic: ⁡
+                - generic [ref=f9e1222]:
+                  - generic [ref=f9e1223]: (
+                  - generic [ref=f9e1224]:
+                    - generic [ref=f9e1225]: f
+                    - generic: ⁡
+                    - generic [ref=f9e1226]:
+                      - generic [ref=f9e1227]: (
+                      - generic [ref=f9e1228]: τ
+                      - generic [ref=f9e1229]: )
+                  - generic [ref=f9e1230]: )
+              - generic [ref=f9e1231]:
+                - generic [ref=f9e1232]:
+                  - generic [ref=f9e1233]: exp
+                  - generic: ⁡
+                  - generic [ref=f9e1234]:
+                    - generic [ref=f9e1235]: (
+                    - generic [ref=f9e1236]:
+                      - generic [ref=f9e1237]: f
+                      - generic [ref=f9e1238]:
+                        - generic [ref=f9e1239]: (
+                        - generic [ref=f9e1240]: τ
+                        - generic [ref=f9e1241]: )
+                    - generic [ref=f9e1242]: )
+                - generic [ref=f9e1243]: +
+                - generic [ref=f9e1244]:
+                  - generic [ref=f9e1245]:
+                    - generic [ref=f9e1246]: π
+                    - generic [ref=f9e1247]: ^
+                  - generic [ref=f9e1248]:
+                    - generic [ref=f9e1249]: (
+                    - generic [ref=f9e1250]: τ
+                    - generic [ref=f9e1251]: )
+          - text: ", allowing the optimal reward function to be recovered as"
+          - math [ref=f9e1252]:
+            - generic [ref=f9e1254]:
+              - generic [ref=f9e1255]: f
+              - generic: ⁡
+              - generic [ref=f9e1256]:
+                - generic [ref=f9e1257]: (
+                - generic [ref=f9e1258]:
+                  - generic [ref=f9e1259]: +
+                  - generic [ref=f9e1260]: const
+                - generic [ref=f9e1261]: )
+          - text: . AIRL makes a practical algorithm from this by changing
+          - math [ref=f9e1262]:
+            - generic [ref=f9e1263]: D
+          - text: to operate over state-action pairs, as in GAIL, and also further disentangling the recovered reward function
+          - math [ref=f9e1265]:
+            - generic [ref=f9e1266]: f
+          - text: as the sum of a reward approximator
+          - math [ref=f9e1268]:
+            - generic [ref=f9e1270]:
+              - generic [ref=f9e1271]: g
+              - generic: ⁡
+              - generic [ref=f9e1272]:
+                - generic [ref=f9e1273]: (
+                - generic [ref=f9e1274]: s
+                - generic [ref=f9e1275]: ","
+                - generic [ref=f9e1276]: a
+                - generic [ref=f9e1277]: )
+          - text: and a reward shaping term
+          - generic [ref=f9e1278]:
+            - text: (
+            - link "Ng et al. 1999" [ref=f9e1279] [cursor=pointer]:
+              - /url: "#bib.bib40"
+            - text: )
+          - math [ref=f9e1280]:
+            - generic [ref=f9e1282]:
+              - generic [ref=f9e1283]: h
+              - generic: ⁡
+              - generic [ref=f9e1284]:
+                - generic [ref=f9e1285]: (
+                - generic [ref=f9e1286]: s
+                - generic [ref=f9e1287]: )
+          - text: ":"
+          - math [ref=f9e1288]:
+            - generic [ref=f9e1290]:
+              - generic [ref=f9e1291]:
+                - generic [ref=f9e1292]: f
+                - generic: ⁡
+                - generic [ref=f9e1293]:
+                  - generic [ref=f9e1294]: (
+                  - generic [ref=f9e1295]: s
+                  - generic [ref=f9e1296]: ","
+                  - generic [ref=f9e1297]: a
+                  - generic [ref=f9e1298]: ","
+                  - generic [ref=f9e1299]:
+                    - generic [ref=f9e1300]: s
+                    - generic [ref=f9e1301]: ′
+                  - generic [ref=f9e1302]: )
+              - generic [ref=f9e1303]: =
+              - generic [ref=f9e1304]:
+                - generic [ref=f9e1305]:
+                  - generic [ref=f9e1306]:
+                    - generic [ref=f9e1307]: g
+                    - generic: ⁡
+                    - generic [ref=f9e1308]:
+                      - generic [ref=f9e1309]: (
+                      - generic [ref=f9e1310]: s
+                      - generic [ref=f9e1311]: ","
+                      - generic [ref=f9e1312]: a
+                      - generic [ref=f9e1313]: )
+                  - generic [ref=f9e1314]: +
+                  - generic [ref=f9e1315]:
+                    - generic [ref=f9e1316]: γ
+                    - generic [ref=f9e1317]: h
+                    - generic [ref=f9e1318]:
+                      - generic [ref=f9e1319]: (
+                      - generic [ref=f9e1320]:
+                        - generic [ref=f9e1321]: s
+                        - generic [ref=f9e1322]: ′
+                      - generic [ref=f9e1323]: )
+                - generic [ref=f9e1324]: −
+                - generic [ref=f9e1325]:
+                  - generic [ref=f9e1326]: h
+                  - generic: ⁡
+                  - generic [ref=f9e1327]:
+                    - generic [ref=f9e1328]: (
+                    - generic [ref=f9e1329]: s
+                    - generic [ref=f9e1330]: )
+          - text: ", where"
+          - math [ref=f9e1331]:
+            - generic [ref=f9e1333]:
+              - generic [ref=f9e1334]: s
+              - generic [ref=f9e1335]: ′
+          - text: is the successor state.
+        - paragraph [ref=f9e1337]:
+          - text: One of the most significant improvements to adversarial IL methods came from moving to more sample-efficient off-policy RL algorithms
+          - generic [ref=f9e1338]:
+            - text: (
+            - link "Kostrikov et al. 2019" [ref=f9e1339] [cursor=pointer]:
+              - /url: "#bib.bib32"
+            - text: ;
+            - link "Blondé and Kalousis 2019" [ref=f9e1340] [cursor=pointer]:
+              - /url: "#bib.bib6"
+            - text: )
+          - text: ", which perform updates on batches of data stored in an experience replay memory"
+          - generic [ref=f9e1341]:
+            - text: (
+            - link "Lin 1992" [ref=f9e1342] [cursor=pointer]:
+              - /url: "#bib.bib35"
+            - text: )
+          - text: . The discriminator can similarly be more efficiently trained on replay data, and although this should include an importance weighting term to account for the change in data distribution, in practice this is not needed
+          - generic [ref=f9e1343]:
+            - text: (
+            - link "Kostrikov et al. 2019" [ref=f9e1344] [cursor=pointer]:
+              - /url: "#bib.bib32"
+            - text: )
+          - text: .
+        - paragraph [ref=f9e1346]:
+          - text: There are countless more advances within adversarial IL, making it difficult to know which techniques increase performance robustly.
+          - link "Orsini et al. 2021" [ref=f9e1348] [cursor=pointer]:
+            - /url: "#bib.bib43"
+          - text: performed a large-scale hyperparameter search over many of these methods. The key takeaways were that off-policy RL algorithms help improve sample efficiency, discriminator regularisation is key, and that hyperparameter choices which are optimal for AI-generated trajectories are not always the same for human-generated trajectories—a valuable distinction that lies out of the scope of this work. Their work also shows the importance of large-scale empirical evaluation, as their results overturned theoretical claims about the importance of discriminator regularisation
+          - generic [ref=f9e1349]:
+            - text: (
+            - link "Blondé et al. 2022" [ref=f9e1350] [cursor=pointer]:
+              - /url: "#bib.bib7"
+            - text: )
+          - text: .
+      - generic [ref=f9e1351]:
+        - heading "2.5 Distribution Matching Imitation Learning" [level=3] [ref=f9e1352]:
+          - generic [ref=f9e1353]: "2.5"
+          - text: Distribution Matching Imitation Learning
+        - paragraph [ref=f9e1355]: One disadvantage of adversarial training is the requirement for the discriminator, which is also undergoing training as part of the minimax game, to provide a useful training signal to the generator. There are several other IRL algorithms that also attempt to match the expert and agent’s state-action distributions, but use non-adversarial methods.
+        - paragraph [ref=f9e1357]:
+          - text: One solution is to replace the discriminator with a nonparametric model
+          - generic [ref=f9e1358]:
+            - text: (
+            - link "Li et al. 2015" [ref=f9e1359] [cursor=pointer]:
+              - /url: "#bib.bib34"
+            - text: ;
+            - link "Dziugaite et al. 2015" [ref=f9e1360] [cursor=pointer]:
+              - /url: "#bib.bib14"
+            - text: )
+          - text: . Specifically, distribution matching can be achieved by minimising the maximum mean discrepancy
+          - generic [ref=f9e1361]:
+            - text: (
+            - link "Gretton et al. 2012" [ref=f9e1362] [cursor=pointer]:
+              - /url: "#bib.bib22"
+            - text: ", MMD;)"
+          - text: defined over a reproducing kernel Hilbert space (RKHS). Given distributions,
+          - math [ref=f9e1363]:
+            - generic [ref=f9e1364]: P
+          - text: and
+          - math [ref=f9e1366]:
+            - generic [ref=f9e1367]: Q
+          - text: ", and a mapping"
+          - math [ref=f9e1369]:
+            - generic [ref=f9e1371]:
+              - generic [ref=f9e1372]: ψ
+              - generic [ref=f9e1373]: ":"
+              - generic [ref=f9e1374]:
+                - generic [ref=f9e1375]: 𝒳
+                - generic [ref=f9e1376]: →
+                - generic [ref=f9e1377]: ℋ
+          - text: from features
+          - math [ref=f9e1378]:
+            - generic [ref=f9e1380]:
+              - generic [ref=f9e1381]: X
+              - generic [ref=f9e1382]: ∈
+              - generic [ref=f9e1383]: 𝒳
+          - text: to an RKHS
+          - math [ref=f9e1384]:
+            - generic [ref=f9e1385]: ℋ
+          - text: ", the MMD is the distance between the mean embeddings of the features:"
+          - math [ref=f9e1387]:
+            - generic [ref=f9e1389]:
+              - generic [ref=f9e1390]:
+                - generic [ref=f9e1391]: MMD
+                - generic [ref=f9e1392]:
+                  - generic [ref=f9e1393]: (
+                  - generic [ref=f9e1394]: P
+                  - generic [ref=f9e1395]: ","
+                  - generic [ref=f9e1396]: Q
+                  - generic [ref=f9e1397]: )
+              - generic [ref=f9e1398]: =
+              - generic [ref=f9e1399]:
+                - generic [ref=f9e1400]:
+                  - generic [ref=f9e1401]: ‖
+                  - generic [ref=f9e1402]:
+                    - generic [ref=f9e1403]:
+                      - generic [ref=f9e1404]:
+                        - generic [ref=f9e1405]: 𝔼
+                        - generic [ref=f9e1406]:
+                          - generic [ref=f9e1407]: x
+                          - generic [ref=f9e1408]: ∼
+                          - generic [ref=f9e1409]: P
+                      - generic [ref=f9e1410]:
+                        - generic [ref=f9e1411]: "["
+                        - generic [ref=f9e1412]:
+                          - generic [ref=f9e1413]: ψ
+                          - generic: ⁡
+                          - generic [ref=f9e1414]:
+                            - generic [ref=f9e1415]: (
+                            - generic [ref=f9e1416]: x
+                            - generic [ref=f9e1417]: )
+                        - generic [ref=f9e1418]: "]"
+                    - generic [ref=f9e1419]: −
+                    - generic [ref=f9e1420]:
+                      - generic [ref=f9e1421]:
+                        - generic [ref=f9e1422]: 𝔼
+                        - generic [ref=f9e1423]:
+                          - generic [ref=f9e1424]: "y"
+                          - generic [ref=f9e1425]: ∼
+                          - generic [ref=f9e1426]: Q
+                      - generic [ref=f9e1427]:
+                        - generic [ref=f9e1428]: "["
+                        - generic [ref=f9e1429]:
+                          - generic [ref=f9e1430]: ψ
+                          - generic: ⁡
+                          - generic [ref=f9e1431]:
+                            - generic [ref=f9e1432]: (
+                            - generic [ref=f9e1433]: "y"
+                            - generic [ref=f9e1434]: )
+                        - generic [ref=f9e1435]: "]"
+                  - generic [ref=f9e1436]: ‖
+                - generic [ref=f9e1437]: ℋ
+          - text: . Using a kernel function
+          - math [ref=f9e1438]:
+            - generic [ref=f9e1439]: k
+          - text: ", one can calculate"
+          - math [ref=f9e1441]:
+            - generic [ref=f9e1443]:
+              - generic [ref=f9e1444]:
+                - generic [ref=f9e1445]:
+                  - generic [ref=f9e1446]: MMD
+                  - generic [ref=f9e1447]: "2"
+                - generic [ref=f9e1448]:
+                  - generic [ref=f9e1449]: (
+                  - generic [ref=f9e1450]: P
+                  - generic [ref=f9e1451]: ","
+                  - generic [ref=f9e1452]: Q
+                  - generic [ref=f9e1453]: )
+              - generic [ref=f9e1454]: =
+              - generic [ref=f9e1455]:
+                - generic [ref=f9e1456]:
+                  - generic [ref=f9e1457]:
+                    - generic [ref=f9e1458]:
+                      - generic [ref=f9e1459]: 𝔼
+                      - generic [ref=f9e1460]:
+                        - generic [ref=f9e1461]:
+                          - generic [ref=f9e1462]: x
+                          - generic [ref=f9e1463]: ","
+                          - generic [ref=f9e1464]:
+                            - generic [ref=f9e1465]: x
+                            - generic [ref=f9e1466]: ′
+                        - generic [ref=f9e1467]: ∼
+                        - generic [ref=f9e1468]: P
+                    - generic [ref=f9e1469]: k
+                    - generic [ref=f9e1470]:
+                      - generic [ref=f9e1471]: (
+                      - generic [ref=f9e1472]: x
+                      - generic [ref=f9e1473]: ","
+                      - generic [ref=f9e1474]:
+                        - generic [ref=f9e1475]: x
+                        - generic [ref=f9e1476]: ′
+                      - generic [ref=f9e1477]: )
+                  - generic [ref=f9e1478]: +
+                  - generic [ref=f9e1479]:
+                    - generic [ref=f9e1480]:
+                      - generic [ref=f9e1481]: 𝔼
+                      - generic [ref=f9e1482]:
+                        - generic [ref=f9e1483]:
+                          - generic [ref=f9e1484]: "y"
+                          - generic [ref=f9e1485]: ","
+                          - generic [ref=f9e1486]:
+                            - generic [ref=f9e1487]: "y"
+                            - generic [ref=f9e1488]: ′
+                        - generic [ref=f9e1489]: ∼
+                        - generic [ref=f9e1490]: Q
+                    - generic [ref=f9e1491]: k
+                    - generic [ref=f9e1492]:
+                      - generic [ref=f9e1493]: (
+                      - generic [ref=f9e1494]: "y"
+                      - generic [ref=f9e1495]: ","
+                      - generic [ref=f9e1496]:
+                        - generic [ref=f9e1497]: "y"
+                        - generic [ref=f9e1498]: ′
+                      - generic [ref=f9e1499]: )
+                - generic [ref=f9e1500]: −
+                - generic [ref=f9e1501]:
+                  - generic [ref=f9e1502]: "2"
+                  - generic [ref=f9e1503]:
+                    - generic [ref=f9e1504]: 𝔼
+                    - generic [ref=f9e1505]:
+                      - generic [ref=f9e1506]:
+                        - generic [ref=f9e1507]: x
+                        - generic [ref=f9e1508]: ∼
+                        - generic [ref=f9e1509]: P
+                      - generic [ref=f9e1510]: ","
+                      - generic [ref=f9e1511]:
+                        - generic [ref=f9e1512]: "y"
+                        - generic [ref=f9e1513]: ∼
+                        - generic [ref=f9e1514]: Q
+                  - generic [ref=f9e1515]: k
+                  - generic [ref=f9e1516]:
+                    - generic [ref=f9e1517]: (
+                    - generic [ref=f9e1518]: x
+                    - generic [ref=f9e1519]: ","
+                    - generic [ref=f9e1520]: "y"
+                    - generic [ref=f9e1521]: )
+          - text: .
+        - generic [ref=f9e1522]:
+          - paragraph [ref=f9e1523]:
+            - text: GMMIL
+            - generic [ref=f9e1524]:
+              - text: (
+              - link "Kim and Park 2018" [ref=f9e1525] [cursor=pointer]:
+                - /url: "#bib.bib31"
+              - text: )
+            - text: extends this principle to the IL setting. Dropping terms that are constant with respect to
+            - math [ref=f9e1526]:
+              - generic [ref=f9e1528]:
+                - generic [ref=f9e1529]: π
+                - generic [ref=f9e1530]: ^
+            - text: ", GMMIL has the reward function:"
+          - table [ref=f9e1531]:
+            - rowgroup [ref=f9e1532]:
+              - row [ref=f9e1533]:
+                - cell [ref=f9e1534]
+                - cell [ref=f9e1535]:
+                  - math [ref=f9e1536]:
+                    - generic [ref=f9e1538]:
+                      - generic [ref=f9e1539]:
+                        - generic [ref=f9e1540]:
+                          - generic [ref=f9e1541]: ℛ
+                          - generic [ref=f9e1542]: ^
+                        - generic [ref=f9e1543]: =
+                        - generic [ref=f9e1544]:
+                          - generic [ref=f9e1545]:
+                            - generic [ref=f9e1547]:
+                              - generic [ref=f9e1548]: "1"
+                              - generic [ref=f9e1549]: M
+                            - generic [ref=f9e1550]:
+                              - generic [ref=f9e1552]:
+                                - generic [ref=f9e1553]: ∑
+                                - generic [ref=f9e1554]:
+                                  - generic [ref=f9e1555]: i
+                                  - generic [ref=f9e1556]: =
+                                  - generic [ref=f9e1557]: "1"
+                                - generic [ref=f9e1558]: M
+                              - generic [ref=f9e1559]:
+                                - generic [ref=f9e1560]: k
+                                - generic: ⁡
+                                - generic [ref=f9e1561]:
+                                  - generic [ref=f9e1562]: (
+                                  - generic [ref=f9e1563]:
+                                    - generic [ref=f9e1564]: (
+                                    - generic [ref=f9e1565]: s
+                                    - generic [ref=f9e1566]: ","
+                                    - generic [ref=f9e1567]: a
+                                    - generic [ref=f9e1568]: )
+                                  - generic [ref=f9e1569]: ","
+                                  - generic [ref=f9e1570]:
+                                    - generic [ref=f9e1571]: (
+                                    - generic [ref=f9e1572]:
+                                      - generic [ref=f9e1573]: s
+                                      - generic [ref=f9e1574]: i
+                                      - generic [ref=f9e1575]: ∗
+                                    - generic [ref=f9e1576]: ","
+                                    - generic [ref=f9e1577]:
+                                      - generic [ref=f9e1578]: a
+                                      - generic [ref=f9e1579]: i
+                                      - generic [ref=f9e1580]: ∗
+                                    - generic [ref=f9e1581]: )
+                                  - generic [ref=f9e1582]: )
+                          - generic [ref=f9e1583]: −
+                          - generic [ref=f9e1584]:
+                            - generic [ref=f9e1586]:
+                              - generic [ref=f9e1587]: "1"
+                              - generic [ref=f9e1588]: "N"
+                            - generic [ref=f9e1589]:
+                              - generic [ref=f9e1591]:
+                                - generic [ref=f9e1592]: ∑
+                                - generic [ref=f9e1593]:
+                                  - generic [ref=f9e1594]: j
+                                  - generic [ref=f9e1595]: =
+                                  - generic [ref=f9e1596]: "1"
+                                - generic [ref=f9e1597]: "N"
+                              - generic [ref=f9e1598]:
+                                - generic [ref=f9e1599]: k
+                                - generic: ⁡
+                                - generic [ref=f9e1600]:
+                                  - generic [ref=f9e1601]: (
+                                  - generic [ref=f9e1602]:
+                                    - generic [ref=f9e1603]: (
+                                    - generic [ref=f9e1604]: s
+                                    - generic [ref=f9e1605]: ","
+                                    - generic [ref=f9e1606]: a
+                                    - generic [ref=f9e1607]: )
+                                  - generic [ref=f9e1608]: ","
+                                  - generic [ref=f9e1609]:
+                                    - generic [ref=f9e1610]: (
+                                    - generic [ref=f9e1611]:
+                                      - generic [ref=f9e1612]: s
+                                      - generic [ref=f9e1613]: j
+                                    - generic [ref=f9e1614]: ","
+                                    - generic [ref=f9e1615]:
+                                      - generic [ref=f9e1616]: a
+                                      - generic [ref=f9e1617]: j
+                                    - generic [ref=f9e1618]: )
+                                  - generic [ref=f9e1619]: )
+                      - generic [ref=f9e1620]: ","
+                - cell [ref=f9e1621]
+                - cell "(4)" [ref=f9e1622]
+          - paragraph [ref=f9e1624]:
+            - text: where
+            - math [ref=f9e1625]:
+              - generic [ref=f9e1626]: M
+            - text: and
+            - math [ref=f9e1628]:
+              - generic [ref=f9e1629]: "N"
+            - text: are the number of state-action pairs from
+            - math [ref=f9e1631]:
+              - generic [ref=f9e1633]:
+                - generic [ref=f9e1634]: π
+                - generic [ref=f9e1635]: ∗
+            - text: and
+            - math [ref=f9e1636]:
+              - generic [ref=f9e1638]:
+                - generic [ref=f9e1639]: π
+                - generic [ref=f9e1640]: ^
+            - text: ", respectively."
+        - generic [ref=f9e1641]:
+          - paragraph [ref=f9e1642]:
+            - text: Two disadvantages of GMMIL are that 1) the “discriminator” cannot learn relevant features, and 2) it has
+            - math [ref=f9e1643]:
+              - generic [ref=f9e1645]:
+                - generic [ref=f9e1646]: O
+                - generic: ⁡
+                - generic [ref=f9e1647]:
+                  - generic [ref=f9e1648]: (
+                  - generic [ref=f9e1649]:
+                    - generic [ref=f9e1650]: M
+                    - generic [ref=f9e1651]: "N"
+                  - generic [ref=f9e1652]: )
+            - text: complexity. RED
+            - generic [ref=f9e1653]:
+              - text: (
+              - link "Wang et al. 2019" [ref=f9e1654] [cursor=pointer]:
+                - /url: "#bib.bib58"
+              - text: )
+            - text: solves these issues by building upon random network distillation
+            - generic [ref=f9e1655]:
+              - text: (
+              - link "Burda et al. 2018" [ref=f9e1656] [cursor=pointer]:
+                - /url: "#bib.bib10"
+              - text: ", RND;)"
+            - text: . In RND, a predictor network
+            - math [ref=f9e1657]:
+              - generic [ref=f9e1659]:
+                - generic [ref=f9e1660]:
+                  - generic [ref=f9e1661]: f
+                  - generic [ref=f9e1662]: ϕ
+                - generic [ref=f9e1663]: ":"
+                - generic [ref=f9e1664]:
+                  - generic [ref=f9e1665]:
+                    - generic [ref=f9e1666]: 𝒮
+                    - generic [ref=f9e1667]: ×
+                    - generic [ref=f9e1668]: 𝒜
+                  - generic [ref=f9e1669]: →
+                  - generic [ref=f9e1670]:
+                    - generic [ref=f9e1671]: ℝ
+                    - generic [ref=f9e1672]: K
+            - text: is trained to minimise the mean squared error (MSE) against a fixed, randomly initialised network
+            - math [ref=f9e1673]:
+              - generic [ref=f9e1675]:
+                - generic [ref=f9e1676]:
+                  - generic [ref=f9e1677]: f
+                  - generic [ref=f9e1678]:
+                    - generic [ref=f9e1679]: ϕ
+                    - generic [ref=f9e1680]: ¯
+                - generic [ref=f9e1681]: ":"
+                - generic [ref=f9e1682]:
+                  - generic [ref=f9e1683]:
+                    - generic [ref=f9e1684]: 𝒮
+                    - generic [ref=f9e1685]: ×
+                    - generic [ref=f9e1686]: 𝒜
+                  - generic [ref=f9e1687]: →
+                  - generic [ref=f9e1688]:
+                    - generic [ref=f9e1689]: ℝ
+                    - generic [ref=f9e1690]: K
+            - text: . Empirically, the MSE indicates how out-of-distribution new data is. RED uses a Gaussian function over the MSE, resulting in
+          - table [ref=f9e1691]:
+            - rowgroup [ref=f9e1692]:
+              - row [ref=f9e1693]:
+                - cell [ref=f9e1694]
+                - cell [ref=f9e1695]:
+                  - math [ref=f9e1696]:
+                    - generic [ref=f9e1698]:
+                      - generic [ref=f9e1699]:
+                        - generic [ref=f9e1700]:
+                          - generic [ref=f9e1701]: ℛ
+                          - generic [ref=f9e1702]: ^
+                        - generic [ref=f9e1703]: =
+                        - generic [ref=f9e1704]:
+                          - generic [ref=f9e1705]: exp
+                          - generic: ⁡
+                          - generic [ref=f9e1706]:
+                            - generic [ref=f9e1707]: (
+                            - generic [ref=f9e1708]:
+                              - generic [ref=f9e1709]: −
+                              - generic [ref=f9e1710]:
+                                - generic [ref=f9e1711]: σ
+                                - generic [ref=f9e1712]:
+                                  - generic [ref=f9e1713]:
+                                    - generic [ref=f9e1714]: ‖
+                                    - generic [ref=f9e1715]:
+                                      - generic [ref=f9e1716]:
+                                        - generic [ref=f9e1717]:
+                                          - generic [ref=f9e1718]: f
+                                          - generic [ref=f9e1719]: ϕ
+                                        - generic [ref=f9e1720]:
+                                          - generic [ref=f9e1721]: (
+                                          - generic [ref=f9e1722]: s
+                                          - generic [ref=f9e1723]: ","
+                                          - generic [ref=f9e1724]: a
+                                          - generic [ref=f9e1725]: )
+                                      - generic [ref=f9e1726]: −
+                                      - generic [ref=f9e1727]:
+                                        - generic [ref=f9e1728]:
+                                          - generic [ref=f9e1729]: f
+                                          - generic [ref=f9e1730]:
+                                            - generic [ref=f9e1731]: ϕ
+                                            - generic [ref=f9e1732]: ¯
+                                        - generic [ref=f9e1733]:
+                                          - generic [ref=f9e1734]: (
+                                          - generic [ref=f9e1735]: s
+                                          - generic [ref=f9e1736]: ","
+                                          - generic [ref=f9e1737]: a
+                                          - generic [ref=f9e1738]: )
+                                    - generic [ref=f9e1739]: ‖
+                                  - generic [ref=f9e1740]: "2"
+                                  - generic [ref=f9e1741]: "2"
+                            - generic [ref=f9e1742]: )
+                      - generic [ref=f9e1743]: ","
+                - cell [ref=f9e1744]
+                - cell "(5)" [ref=f9e1745]
+          - paragraph [ref=f9e1747]:
+            - text: where
+            - math [ref=f9e1748]:
+              - generic [ref=f9e1749]: σ
+            - text: is a bandwidth hyperparameter.
+            - link "Wang et al. 2019" [ref=f9e1752] [cursor=pointer]:
+              - /url: "#bib.bib58"
+            - text: interpret RND as an approximate support estimation method, and hence the RED reward function encourages the agent to have a support over its state-action distribution that matches the expert’s.
+        - generic [ref=f9e1753]:
+          - paragraph [ref=f9e1754]:
+            - text: Similarly to RED, DRIL
+            - generic [ref=f9e1755]:
+              - text: (
+              - link "Brantley et al. 2020" [ref=f9e1756] [cursor=pointer]:
+                - /url: "#bib.bib8"
+              - text: )
+            - text: constructs a reward function based on the disagreement between models trained on the expert data, and can also be interpreted as a support estimation method. However, unlike the other methods which operate over the joint distribution of state-action pairs, DRIL builds simply upon BC, operating over
+            - math [ref=f9e1757]:
+              - generic [ref=f9e1759]:
+                - generic [ref=f9e1760]: p
+                - generic: ⁡
+                - generic [ref=f9e1761]:
+                  - generic [ref=f9e1762]: (
+                  - generic [ref=f9e1763]: a
+                  - generic [ref=f9e1764]: "|"
+                  - generic [ref=f9e1765]: s
+                  - generic [ref=f9e1766]: )
+            - text: . DRIL first trains an ensemble of
+            - math [ref=f9e1767]:
+              - generic [ref=f9e1768]: E
+            - text: different policies using the BC objective (Equation
+            - link "1" [ref=f9e1770] [cursor=pointer]:
+              - /url: "#S2.E1"
+            - text: ") on the expert data, and then uses a function of the (negative of the) variance between the policies to estimate a reward for the agent:"
+          - table [ref=f9e1771]:
+            - rowgroup [ref=f9e1772]:
+              - row [ref=f9e1773]:
+                - cell [ref=f9e1774]
+                - cell [ref=f9e1775]:
+                  - math [ref=f9e1776]:
+                    - generic [ref=f9e1778]:
+                      - generic [ref=f9e1779]: ℛ
+                      - generic [ref=f9e1780]: ^
+                - cell [ref=f9e1781]:
+                  - math [ref=f9e1782]:
+                    - generic [ref=f9e1784]:
+                      - generic [ref=f9e1785]: =
+                      - generic [ref=f9e1786]:
+                        - generic [ref=f9e1787]: −
+                        - generic [ref=f9e1788]:
+                          - generic [ref=f9e1789]:
+                            - generic [ref=f9e1790]: C
+                            - generic [ref=f9e1791]: U
+                            - generic [ref=f9e1792]: clip
+                          - generic [ref=f9e1793]:
+                            - generic [ref=f9e1794]: (
+                            - generic [ref=f9e1795]: s
+                            - generic [ref=f9e1796]: ","
+                            - generic [ref=f9e1797]: a
+                            - generic [ref=f9e1798]: )
+                      - generic [ref=f9e1799]: =
+                      - generic [ref=f9e1800]:
+                        - generic [ref=f9e1801]: "{"
+                        - generic [ref=f9e1802]:
+                          - generic [ref=f9e1803]:
+                            - generic [ref=f9e1804]: "1"
+                            - generic [ref=f9e1807]:
+                              - generic [ref=f9e1808]:
+                                - generic [ref=f9e1809]:
+                                  - generic [ref=f9e1810]:
+                                    - generic [ref=f9e1811]: if
+                                    - generic [ref=f9e1812]: Var
+                                  - generic [ref=f9e1813]:
+                                    - generic [ref=f9e1814]: π
+                                    - generic [ref=f9e1815]: ∈
+                                    - generic [ref=f9e1816]:
+                                      - generic [ref=f9e1817]: Π
+                                      - generic [ref=f9e1818]: E
+                                - generic [ref=f9e1819]:
+                                  - generic [ref=f9e1820]: "["
+                                  - generic [ref=f9e1821]:
+                                    - generic [ref=f9e1822]: π
+                                    - generic: ⁡
+                                    - generic [ref=f9e1823]:
+                                      - generic [ref=f9e1824]: (
+                                      - generic [ref=f9e1825]: a
+                                      - generic [ref=f9e1826]: "|"
+                                      - generic [ref=f9e1827]: s
+                                      - generic [ref=f9e1828]: )
+                                  - generic [ref=f9e1829]: "]"
+                              - generic [ref=f9e1830]: ≤
+                              - generic [ref=f9e1831]: q
+                          - generic [ref=f9e1832]:
+                            - generic [ref=f9e1834]:
+                              - generic [ref=f9e1835]: −
+                              - generic [ref=f9e1836]: "1"
+                            - generic [ref=f9e1838]:
+                              - generic [ref=f9e1839]: otherwise
+                              - generic [ref=f9e1840]: ","
+                - cell [ref=f9e1841]
+                - cell "(6)" [ref=f9e1842]
+          - paragraph [ref=f9e1844]:
+            - text: where the
+            - math [ref=f9e1845]:
+              - generic [ref=f9e1846]: q
+            - text: is a top quantile of the uncertainty cost computed over the expert dataset. While deep ensembles are known to produce reasonable uncertainty estimates (i.e., variance in outputs) on out-of-distribution data
+            - generic [ref=f9e1848]:
+              - text: (
+              - link "Lakshminarayanan et al. 2017" [ref=f9e1849] [cursor=pointer]:
+                - /url: "#bib.bib33"
+              - text: )
+            - text: ", it is also possible to approximate them using sampling with dropout"
+            - generic [ref=f9e1850]:
+              - text: (
+              - link "Srivastava et al. 2014" [ref=f9e1851] [cursor=pointer]:
+                - /url: "#bib.bib52"
+              - text: )
+            - text: .
+            - link "Brantley et al. 2020" [ref=f9e1853] [cursor=pointer]:
+              - /url: "#bib.bib8"
+            - text: showed empirically that this performed comparatively to using independent models.
+        - generic [ref=f9e1854]:
+          - paragraph [ref=f9e1855]:
+            - text: The Wasserstein distance is another way of defining a distance between two probability distributions on a given metric space
+            - math [ref=f9e1856]:
+              - generic [ref=f9e1857]: ℳ
+            - text: ", and minimising it can be interpreted as finding the optimal coupling,"
+            - math [ref=f9e1859]:
+              - generic [ref=f9e1860]: γ
+            - text: ", for transporting probability mass from one distribution to other, whilst minimising the transport cost given by a metric"
+            - math [ref=f9e1862]:
+              - generic [ref=f9e1863]: d
+            - text: "on"
+            - math [ref=f9e1865]:
+              - generic [ref=f9e1866]: ℳ
+            - generic [ref=f9e1868]:
+              - text: (
+              - link "Villani 2009" [ref=f9e1869] [cursor=pointer]:
+                - /url: "#bib.bib57"
+              - text: )
+            - text: .
+            - superscript [ref=f9e1871]: "7"
+            - text: PWIL
+            - generic [ref=f9e1872]:
+              - text: (
+              - link "Dadashi et al. 2021" [ref=f9e1873] [cursor=pointer]:
+                - /url: "#bib.bib12"
+              - text: )
+            - text: "aims to minimise the Wasserstein-2 distance between the agent and expert’s state-action distributions:"
+          - table [ref=f9e1874]:
+            - rowgroup [ref=f9e1875]:
+              - row [ref=f9e1876]:
+                - cell [ref=f9e1877]
+                - cell [ref=f9e1878]:
+                  - math [ref=f9e1879]:
+                    - generic [ref=f9e1881]:
+                      - generic [ref=f9e1882]:
+                        - generic [ref=f9e1883]:
+                          - generic [ref=f9e1884]:
+                            - generic [ref=f9e1885]: inf
+                            - generic [ref=f9e1886]:
+                              - generic [ref=f9e1887]: π
+                              - generic [ref=f9e1888]: ∈
+                              - generic [ref=f9e1889]: Π
+                          - generic [ref=f9e1890]:
+                            - generic [ref=f9e1891]:
+                              - generic [ref=f9e1892]: 𝒲
+                              - generic [ref=f9e1893]: "2"
+                              - generic [ref=f9e1894]: "2"
+                            - generic [ref=f9e1895]:
+                              - generic [ref=f9e1896]: (
+                              - generic [ref=f9e1897]:
+                                - generic [ref=f9e1898]: ρ
+                                - generic [ref=f9e1899]:
+                                  - generic [ref=f9e1900]: π
+                                  - generic [ref=f9e1901]: ^
+                              - generic [ref=f9e1902]: ","
+                              - generic [ref=f9e1903]:
+                                - generic [ref=f9e1904]: ρ
+                                - generic [ref=f9e1905]:
+                                  - generic [ref=f9e1906]: π
+                                  - generic [ref=f9e1907]: ∗
+                              - generic [ref=f9e1908]: )
+                        - generic [ref=f9e1909]: =
+                        - generic [ref=f9e1910]:
+                          - generic [ref=f9e1911]:
+                            - generic [ref=f9e1912]: inf
+                            - generic [ref=f9e1913]:
+                              - generic [ref=f9e1914]: π
+                              - generic [ref=f9e1915]: ∈
+                              - generic [ref=f9e1916]: Π
+                          - generic [ref=f9e1917]:
+                            - generic [ref=f9e1918]:
+                              - generic [ref=f9e1919]: inf
+                              - generic [ref=f9e1920]:
+                                - generic [ref=f9e1921]: γ
+                                - generic [ref=f9e1922]: ∈
+                                - generic [ref=f9e1923]: Γ
+                            - generic [ref=f9e1924]:
+                              - generic [ref=f9e1926]:
+                                - generic [ref=f9e1927]: ∑
+                                - generic [ref=f9e1928]:
+                                  - generic [ref=f9e1929]: t
+                                  - generic [ref=f9e1930]: =
+                                  - generic [ref=f9e1931]: "1"
+                                - generic [ref=f9e1932]: T
+                              - generic [ref=f9e1933]:
+                                - generic [ref=f9e1934]:
+                                  - generic [ref=f9e1935]:
+                                    - generic [ref=f9e1937]:
+                                      - generic [ref=f9e1938]: ∑
+                                      - generic [ref=f9e1939]:
+                                        - generic [ref=f9e1940]: m
+                                        - generic [ref=f9e1941]: =
+                                        - generic [ref=f9e1942]: "1"
+                                      - generic [ref=f9e1943]: M
+                                    - generic [ref=f9e1944]:
+                                      - generic [ref=f9e1945]: d
+                                      - generic [ref=f9e1946]:
+                                        - generic [ref=f9e1947]:
+                                          - generic [ref=f9e1948]: (
+                                          - generic [ref=f9e1949]:
+                                            - generic [ref=f9e1950]: (
+                                            - generic [ref=f9e1951]:
+                                              - generic [ref=f9e1952]: s
+                                              - generic [ref=f9e1953]: t
+                                            - generic [ref=f9e1954]: ","
+                                            - generic [ref=f9e1955]:
+                                              - generic [ref=f9e1956]: a
+                                              - generic [ref=f9e1957]: t
+                                            - generic [ref=f9e1958]: )
+                                          - generic [ref=f9e1959]: ","
+                                          - generic [ref=f9e1960]:
+                                            - generic [ref=f9e1961]: (
+                                            - generic [ref=f9e1962]:
+                                              - generic [ref=f9e1963]: s
+                                              - generic [ref=f9e1964]: t
+                                              - generic [ref=f9e1965]: ∗
+                                            - generic [ref=f9e1966]: ","
+                                            - generic [ref=f9e1967]:
+                                              - generic [ref=f9e1968]: a
+                                              - generic [ref=f9e1969]: t
+                                              - generic [ref=f9e1970]: ∗
+                                            - generic [ref=f9e1971]: )
+                                          - generic [ref=f9e1972]: )
+                                        - generic [ref=f9e1973]: "2"
+                                      - generic [ref=f9e1974]: γ
+                                      - generic [ref=f9e1975]:
+                                        - generic [ref=f9e1976]: "["
+                                        - generic [ref=f9e1977]:
+                                          - generic [ref=f9e1978]: t
+                                          - generic [ref=f9e1979]: ","
+                                          - generic [ref=f9e1980]: m
+                                        - generic [ref=f9e1981]: "]"
+                                  - generic [ref=f9e1982]: ⏟
+                                - generic [ref=f9e1983]:
+                                  - generic [ref=f9e1984]: c
+                                  - generic [ref=f9e1985]:
+                                    - generic [ref=f9e1986]: t
+                                    - generic [ref=f9e1987]: ","
+                                    - generic [ref=f9e1988]: π
+                      - generic [ref=f9e1989]: ","
+                - cell [ref=f9e1990]
+                - cell "(7)" [ref=f9e1991]
+          - paragraph [ref=f9e1993]:
+            - text: where
+            - math [ref=f9e1994]:
+              - generic [ref=f9e1996]:
+                - generic [ref=f9e1997]: c
+                - generic [ref=f9e1998]:
+                  - generic [ref=f9e1999]: t
+                  - generic [ref=f9e2000]: ","
+                  - generic [ref=f9e2001]: π
+            - text: is the (time-dependent) optimal transport cost.
+        - generic [ref=f9e2002]:
+          - paragraph [ref=f9e2003]:
+            - text: The optimal coupling for policy
+            - math [ref=f9e2004]:
+              - generic [ref=f9e2005]: π
+            - text: ","
+            - math [ref=f9e2007]:
+              - generic [ref=f9e2009]:
+                - generic [ref=f9e2010]: γ
+                - generic [ref=f9e2011]: π
+                - generic [ref=f9e2012]: ∗
+            - text: ", requires the full trajectory generated by"
+            - math [ref=f9e2013]:
+              - generic [ref=f9e2014]: π
+            - text: ", so"
+            - link "Dadashi et al. 2021" [ref=f9e2017] [cursor=pointer]:
+              - /url: "#bib.bib12"
+            - text: define a greedy coupling
+            - math [ref=f9e2018]:
+              - generic [ref=f9e2020]:
+                - generic [ref=f9e2021]: γ
+                - generic [ref=f9e2022]: π
+                - generic [ref=f9e2023]: g
+            - text: that transports probability mass at each timestep
+            - math [ref=f9e2024]:
+              - generic [ref=f9e2025]: t
+            - text: ", allowing the cost to be calculated online as the agent interacts with the environment. The cost with the greedy coupling,"
+            - math [ref=f9e2027]:
+              - generic [ref=f9e2029]:
+                - generic [ref=f9e2030]: c
+                - generic [ref=f9e2031]:
+                  - generic [ref=f9e2032]: t
+                  - generic [ref=f9e2033]: ","
+                  - generic [ref=f9e2034]: π
+                - generic [ref=f9e2035]: g
+            - text: ", is an upper bound to the Wasserstein distance, and hence optimising it still minimises the distance between the agent and expert’s state-action distribution. The reward can be defined by applying a monotonously decreasing function to the cost:"
+          - table [ref=f9e2036]:
+            - rowgroup [ref=f9e2037]:
+              - row [ref=f9e2038]:
+                - cell [ref=f9e2039]
+                - cell [ref=f9e2040]:
+                  - math [ref=f9e2041]:
+                    - generic [ref=f9e2043]:
+                      - generic [ref=f9e2044]:
+                        - generic [ref=f9e2045]:
+                          - generic [ref=f9e2046]:
+                            - generic [ref=f9e2047]: ℛ
+                            - generic [ref=f9e2048]: t
+                          - generic [ref=f9e2049]: ^
+                        - generic [ref=f9e2050]: =
+                        - generic [ref=f9e2051]:
+                          - generic [ref=f9e2052]: α
+                          - generic [ref=f9e2053]:
+                            - generic [ref=f9e2054]: exp
+                            - generic: ⁡
+                            - generic [ref=f9e2055]:
+                              - generic [ref=f9e2056]: (
+                              - generic [ref=f9e2057]:
+                                - generic [ref=f9e2058]: −
+                                - generic [ref=f9e2059]:
+                                  - generic [ref=f9e2061]:
+                                    - generic [ref=f9e2062]:
+                                      - generic [ref=f9e2063]: β
+                                      - generic [ref=f9e2064]: T
+                                    - generic [ref=f9e2066]:
+                                      - generic [ref=f9e2067]:
+                                        - generic [ref=f9e2068]: "|"
+                                        - generic [ref=f9e2069]: 𝒮
+                                        - generic [ref=f9e2070]: "|"
+                                      - generic [ref=f9e2071]: +
+                                      - generic [ref=f9e2072]:
+                                        - generic [ref=f9e2073]: "|"
+                                        - generic [ref=f9e2074]: 𝒜
+                                        - generic [ref=f9e2075]: "|"
+                                  - generic [ref=f9e2076]:
+                                    - generic [ref=f9e2077]: c
+                                    - generic [ref=f9e2078]:
+                                      - generic [ref=f9e2079]: t
+                                      - generic [ref=f9e2080]: ","
+                                      - generic [ref=f9e2081]: π
+                                    - generic [ref=f9e2082]: g
+                              - generic [ref=f9e2083]: )
+                      - generic [ref=f9e2084]: ","
+                - cell [ref=f9e2085]
+                - cell "(8)" [ref=f9e2086]
+          - paragraph [ref=f9e2088]:
+            - text: where
+            - math [ref=f9e2089]:
+              - generic [ref=f9e2090]: α
+            - text: and
+            - math [ref=f9e2092]:
+              - generic [ref=f9e2093]: β
+            - text: are reward scale hyperparameters, and
+            - math [ref=f9e2095]:
+              - generic [ref=f9e2096]: d
+            - text: is set to the Euclidean distance between Z-score normalised state-action pairs.
+        - paragraph [ref=f9e2099]:
+          - text: Another view on distribution matching, known as moment matching
+          - superscript [ref=f9e2101]: "8"
+          - text: ", can be achieved through optimising integral probability metrics"
+          - generic [ref=f9e2102]:
+            - text: (
+            - link "Müller 1997" [ref=f9e2103] [cursor=pointer]:
+              - /url: "#bib.bib38"
+            - text: ", IPM;)"
+          - text: . IPMs provide a distance function between two distributions,
+          - math [ref=f9e2104]:
+            - generic [ref=f9e2106]:
+              - generic [ref=f9e2107]:
+                - generic [ref=f9e2108]:
+                  - generic [ref=f9e2109]: sup
+                  - generic [ref=f9e2110]:
+                    - generic [ref=f9e2111]: f
+                    - generic [ref=f9e2112]: ∈
+                    - generic [ref=f9e2113]: ℱ
+                - generic [ref=f9e2114]:
+                  - generic [ref=f9e2115]:
+                    - generic [ref=f9e2116]: 𝔼
+                    - generic [ref=f9e2117]:
+                      - generic [ref=f9e2118]: x
+                      - generic [ref=f9e2119]: ∼
+                      - generic [ref=f9e2120]: P
+                  - generic [ref=f9e2121]:
+                    - generic [ref=f9e2122]: "["
+                    - generic [ref=f9e2123]:
+                      - generic [ref=f9e2124]: f
+                      - generic: ⁡
+                      - generic [ref=f9e2125]:
+                        - generic [ref=f9e2126]: (
+                        - generic [ref=f9e2127]: x
+                        - generic [ref=f9e2128]: )
+                    - generic [ref=f9e2129]: "]"
+              - generic [ref=f9e2130]: −
+              - generic [ref=f9e2131]:
+                - generic [ref=f9e2132]:
+                  - generic [ref=f9e2133]: 𝔼
+                  - generic [ref=f9e2134]:
+                    - generic [ref=f9e2135]: "y"
+                    - generic [ref=f9e2136]: ∼
+                    - generic [ref=f9e2137]: Q
+                - generic [ref=f9e2138]:
+                  - generic [ref=f9e2139]: "["
+                  - generic [ref=f9e2140]:
+                    - generic [ref=f9e2141]: f
+                    - generic: ⁡
+                    - generic [ref=f9e2142]:
+                      - generic [ref=f9e2143]: (
+                      - generic [ref=f9e2144]: "y"
+                      - generic [ref=f9e2145]: )
+                  - generic [ref=f9e2146]: "]"
+          - text: ", for a function class"
+          - math [ref=f9e2147]:
+            - generic [ref=f9e2148]: ℱ
+          - text: containing functions
+          - math [ref=f9e2150]:
+            - generic [ref=f9e2152]:
+              - generic [ref=f9e2153]: f
+              - generic [ref=f9e2154]: ":"
+              - generic [ref=f9e2155]:
+                - generic [ref=f9e2156]: 𝒳
+                - generic [ref=f9e2157]: →
+                - generic [ref=f9e2158]: ℝ
+          - text: . Different function classes
+          - math [ref=f9e2159]:
+            - generic [ref=f9e2160]: ℱ
+          - text: recover different IPMs; for instance,
+          - math [ref=f9e2162]:
+            - generic [ref=f9e2164]:
+              - generic [ref=f9e2165]: ℱ
+              - generic [ref=f9e2166]: =
+              - generic [ref=f9e2167]:
+                - generic [ref=f9e2168]: "{"
+                - generic [ref=f9e2169]: f
+                - generic [ref=f9e2170]: ":"
+                - generic [ref=f9e2171]:
+                  - generic [ref=f9e2172]:
+                    - generic [ref=f9e2173]:
+                      - generic [ref=f9e2174]: ‖
+                      - generic [ref=f9e2175]: f
+                      - generic [ref=f9e2176]: ‖
+                    - generic [ref=f9e2177]: ℋ
+                  - generic [ref=f9e2178]: ≤
+                  - generic [ref=f9e2179]: "1"
+                - generic [ref=f9e2180]: "}"
+          - text: with RKHS
+          - math [ref=f9e2181]:
+            - generic [ref=f9e2182]: ℋ
+          - text: gives the MMD and
+          - math [ref=f9e2184]:
+            - generic [ref=f9e2186]:
+              - generic [ref=f9e2187]: ℱ
+              - generic [ref=f9e2188]: =
+              - generic [ref=f9e2189]:
+                - generic [ref=f9e2190]: "{"
+                - generic [ref=f9e2191]: f
+                - generic [ref=f9e2192]: ":"
+                - generic [ref=f9e2193]:
+                  - generic [ref=f9e2194]:
+                    - generic [ref=f9e2195]:
+                      - generic [ref=f9e2196]: ‖
+                      - generic [ref=f9e2197]: f
+                      - generic [ref=f9e2198]: ‖
+                    - generic [ref=f9e2199]: L
+                  - generic [ref=f9e2200]: ≤
+                  - generic [ref=f9e2201]: K
+                - generic [ref=f9e2202]: "}"
+          - text: with bounded Lipschitz constant
+          - math [ref=f9e2203]:
+            - generic [ref=f9e2204]: K
+          - text: gives the Wasserstein distance.
+        - generic [ref=f9e2206]:
+          - paragraph [ref=f9e2207]:
+            - link "Swamy et al. 2021" [ref=f9e2209] [cursor=pointer]:
+              - /url: "#bib.bib54"
+            - text: use this to provide a more general view on IL, arguing that training an agent to match the moments of the expert’s reward or action-value distributions will achieve the same performance. When the agent is able to interact with the environment,
+            - link "Swamy et al. 2021" [ref=f9e2211] [cursor=pointer]:
+              - /url: "#bib.bib54"
+            - text: "show that it is possible to do reward moment-matching, with a form that is similar to GMMIL, penalising the difference in moments between the agent and expert’s state-action pairs. However, in their view on IL they also focus on the moment matching happening within a minimax game between the agent and the reward function, which motivates the need to update the reward function. Solving for a closed-form reward function in an RKHS with the indicator kernel function, the AdRIL reward function is:"
+          - table [ref=f9e2212]:
+            - rowgroup [ref=f9e2213]:
+              - row [ref=f9e2214]:
+                - cell [ref=f9e2215]
+                - cell [ref=f9e2216]:
+                  - math [ref=f9e2217]:
+                    - generic [ref=f9e2219]:
+                      - generic [ref=f9e2220]:
+                        - generic [ref=f9e2221]: ℛ
+                        - generic [ref=f9e2222]: ^
+                      - generic [ref=f9e2223]: =
+                      - generic [ref=f9e2224]:
+                        - generic [ref=f9e2225]: "{"
+                        - generic [ref=f9e2226]:
+                          - generic [ref=f9e2227]:
+                            - generic [ref=f9e2229]:
+                              - generic [ref=f9e2230]: "1"
+                              - generic [ref=f9e2231]:
+                                - generic [ref=f9e2232]: "|"
+                                - generic [ref=f9e2233]:
+                                  - generic [ref=f9e2234]: ξ
+                                  - generic [ref=f9e2235]: ∗
+                                - generic [ref=f9e2236]: "|"
+                            - generic [ref=f9e2238]:
+                              - generic [ref=f9e2239]:
+                                - generic [ref=f9e2240]: if
+                                - generic [ref=f9e2241]:
+                                  - generic [ref=f9e2242]: (
+                                  - generic [ref=f9e2243]: s
+                                  - generic [ref=f9e2244]: ","
+                                  - generic [ref=f9e2245]: a
+                                  - generic [ref=f9e2246]: )
+                              - generic [ref=f9e2247]: ∈
+                              - generic [ref=f9e2248]:
+                                - generic [ref=f9e2249]: ξ
+                                - generic [ref=f9e2250]: ∗
+                          - generic [ref=f9e2251]:
+                            - generic [ref=f9e2252]: "0"
+                            - generic [ref=f9e2255]:
+                              - generic [ref=f9e2256]:
+                                - generic [ref=f9e2257]: if
+                                - generic [ref=f9e2258]:
+                                  - generic [ref=f9e2259]: (
+                                  - generic [ref=f9e2260]: s
+                                  - generic [ref=f9e2261]: ","
+                                  - generic [ref=f9e2262]: a
+                                  - generic [ref=f9e2263]: )
+                              - generic [ref=f9e2264]: ∼
+                              - generic [ref=f9e2265]:
+                                - generic [ref=f9e2266]: π
+                                - generic [ref=f9e2267]: ^
+                          - generic [ref=f9e2268]:
+                            - generic [ref=f9e2270]:
+                              - generic [ref=f9e2271]:
+                                - generic [ref=f9e2272]: −
+                                - generic [ref=f9e2273]: "1"
+                              - generic [ref=f9e2274]:
+                                - generic [ref=f9e2275]: round
+                                - generic [ref=f9e2276]: ⋅
+                                - generic [ref=f9e2277]:
+                                  - generic [ref=f9e2278]: "|"
+                                  - generic [ref=f9e2279]: ξ
+                                  - generic [ref=f9e2280]: "|"
+                            - generic [ref=f9e2282]:
+                              - generic [ref=f9e2283]:
+                                - generic [ref=f9e2284]:
+                                  - generic [ref=f9e2285]: if
+                                  - generic [ref=f9e2286]:
+                                    - generic [ref=f9e2287]: (
+                                    - generic [ref=f9e2288]: s
+                                    - generic [ref=f9e2289]: ","
+                                    - generic [ref=f9e2290]: a
+                                    - generic [ref=f9e2291]: )
+                                - generic [ref=f9e2292]: ∼
+                                - generic [ref=f9e2293]:
+                                  - generic [ref=f9e2294]:
+                                    - generic [ref=f9e2295]: π
+                                    - generic [ref=f9e2296]: ^
+                                  - generic [ref=f9e2297]: old
+                              - generic [ref=f9e2298]: ","
+                - cell [ref=f9e2299]
+                - cell "(9)" [ref=f9e2300]
+          - paragraph [ref=f9e2302]:
+            - text: where the final term assigns a negative reward to state-action pairs from old trajectories, inversely proportional to the number of rounds of updates (a hyperparameter that corresponds to a fixed number of updates), and the current number of agent trajectories,
+            - math [ref=f9e2303]:
+              - generic [ref=f9e2305]:
+                - generic [ref=f9e2306]: "|"
+                - generic [ref=f9e2307]: ξ
+                - generic [ref=f9e2308]: "|"
+            - text: . AdRIL can therefore be considered an improvement upon SQIL’s constant reward function, obviating the need for early stopping
+            - generic [ref=f9e2309]:
+              - text: (
+              - link "Reddy et al. 2020" [ref=f9e2310] [cursor=pointer]:
+                - /url: "#bib.bib49"
+              - text: )
+            - text: .
+    - generic [ref=f9e2311]:
+      - heading "3 Experiments" [level=2] [ref=f9e2312]:
+        - generic [ref=f9e2313]: "3"
+        - text: Experiments
+      - generic [ref=f9e2314]:
+        - heading "3.1 Environments + Data" [level=3] [ref=f9e2315]:
+          - generic [ref=f9e2316]: "3.1"
+          - text: Environments + Data
+        - paragraph [ref=f9e2318]:
+          - text: "We evaluate all algorithms on the popular MuJoCo simulated robotics benchmarks: Ant, HalfCheetah, Hopper, and Walker2D"
+          - generic [ref=f9e2319]:
+            - text: (
+            - link "Todorov et al. 2012" [ref=f9e2320] [cursor=pointer]:
+              - /url: "#bib.bib56"
+            - text: ;
+            - link "Brockman et al. 2016" [ref=f9e2321] [cursor=pointer]:
+              - /url: "#bib.bib9"
+            - text: )
+          - text: . To improve reproducibility and enable fairer comparison against other reported results, we use the D4RL “expert-v2” trajectory datasets
+          - generic [ref=f9e2322]:
+            - text: (
+            - link "Fu et al. 2020" [ref=f9e2323] [cursor=pointer]:
+              - /url: "#bib.bib18"
+            - text: )
+          - text: .
+          - superscript [ref=f9e2325]: "9"
+          - text: When loading the expert data we process each episode to distinguish between “true” and time-dependent terminations
+          - generic [ref=f9e2326]:
+            - text: (
+            - link "Pardo et al. 2018" [ref=f9e2327] [cursor=pointer]:
+              - /url: "#bib.bib44"
+            - text: )
+          - text: ", and provide absorbing state indicators"
+          - generic [ref=f9e2328]:
+            - text: (
+            - link "Kostrikov et al. 2019" [ref=f9e2329] [cursor=pointer]:
+              - /url: "#bib.bib32"
+            - text: )
+          - text: "; these are also tracked for agent episodes. By default, we maximise available data by not subsampling expert transitions. We choose 3 different trajectory “budgets” for the IL algorithms to learn from: 5, 10 and 25 expert trajectories."
+      - generic [ref=f9e2330]:
+        - heading "3.2 Algorithms + Hyperparameter Search + Evaluation" [level=3] [ref=f9e2331]:
+          - generic [ref=f9e2332]: "3.2"
+          - text: Algorithms + Hyperparameter Search + Evaluation
+        - paragraph [ref=f9e2334]:
+          - text: All IL algorithms use SAC
+          - generic [ref=f9e2335]:
+            - text: (
+            - link "Haarnoja et al. 2018a" [ref=f9e2336] [cursor=pointer]:
+              - /url: "#bib.bib23"
+            - text: )
+          - text: ", with automatic entropy tuning"
+          - generic [ref=f9e2337]:
+            - text: (
+            - link "Haarnoja et al. 2018b" [ref=f9e2338] [cursor=pointer]:
+              - /url: "#bib.bib24"
+            - text: )
+          - text: ", as the base RL agent, as theoretically required by SQIL and AdRIL, and as was empirically shown to be performant for adversarial IL algorithms"
+          - generic [ref=f9e2339]:
+            - text: (
+            - link "Orsini et al. 2021" [ref=f9e2340] [cursor=pointer]:
+              - /url: "#bib.bib43"
+            - text: )
+          - text: . The actor applies a tanh transformation to scale actions
+          - math [ref=f9e2341]:
+            - generic [ref=f9e2343]:
+              - generic [ref=f9e2344]: ∈
+              - generic [ref=f9e2345]:
+                - generic [ref=f9e2346]: (
+                - generic [ref=f9e2347]:
+                  - generic [ref=f9e2348]: −
+                  - generic [ref=f9e2349]: "1"
+                - generic [ref=f9e2350]: ","
+                - generic [ref=f9e2351]: "1"
+                - generic [ref=f9e2352]: )
+          - text: ", and dual critics are trained to reduce value overestimation"
+          - generic [ref=f9e2353]:
+            - text: (
+            - link "Fujimoto et al. 2018" [ref=f9e2354] [cursor=pointer]:
+              - /url: "#bib.bib19"
+            - text: )
+          - text: . We also include BC as a baseline, with the same actor architecture. All algorithms are optimised with AdamW
+          - generic [ref=f9e2355]:
+            - text: (
+            - link "Loshchilov and Hutter 2019" [ref=f9e2356] [cursor=pointer]:
+              - /url: "#bib.bib36"
+            - text: )
+          - text: . We use PyTorch
+          - generic [ref=f9e2357]:
+            - text: (
+            - link "Paszke et al. 2019" [ref=f9e2358] [cursor=pointer]:
+              - /url: "#bib.bib45"
+            - text: )
+          - text: for all of our code.
+        - paragraph [ref=f9e2360]:
+          - text: "We group the IL algorithms and their variants into 6 key methods: AdRIL, DRIL, GAIL, GMMIL, PWIL, and RED. Our hyperparameter search spaces were determined based on hyperparameter ranges within the original works, a large subset of options tried by"
+          - link "Orsini et al. 2021" [ref=f9e2362] [cursor=pointer]:
+            - /url: "#bib.bib43"
+          - text: ", and general hyperparameters such as learning rate and batch size, resulting in 7-18 hyperparameters to tune per algorithm. For each trajectory budget, we give each algorithm 30 hyperparameter evaluations using Bayesian optimisation"
+          - generic [ref=f9e2363]:
+            - text: (
+            - link "Balandat et al. 2020" [ref=f9e2364] [cursor=pointer]:
+              - /url: "#bib.bib5"
+            - text: )
+          - text: ", with the minimum of the cumulative reward for each of the 4 environments used as the optimisation objective, which can be seen as minimising regret over a set of environments. We then evaluate agents over 10 seeds with the best hyperparameters found, and report performance according to best practices"
+          - generic [ref=f9e2365]:
+            - text: (
+            - link "Agarwal et al. 2021" [ref=f9e2366] [cursor=pointer]:
+              - /url: "#bib.bib1"
+            - text: )
+          - text: . We therefore train 2880 agents for the final results, not including the extensive training and testing of agents performed while replicating and augmenting IL algorithms.
+        - paragraph [ref=f9e2368]: DRIL, GAIL and RED include several options for their trained discriminators, including network hidden size, depth, activation function, dropout, and weight decay. The GAIL discriminator has additional options, detailed below.
+        - paragraph [ref=f9e2370]:
+          - text: AdRIL options include balanced sampling
+          - generic [ref=f9e2371]:
+            - text: (
+            - link "Swamy et al. 2021" [ref=f9e2372] [cursor=pointer]:
+              - /url: "#bib.bib54"
+            - text: ", alternating sampling expert and agent data batches vs. mixed batches,)"
+          - text: ", and the discriminator update frequency"
+          - math [ref=f9e2373]:
+            - generic [ref=f9e2375]:
+              - generic [ref=f9e2376]: ≥
+              - generic [ref=f9e2377]: "1"
+          - text: ", which determines the number of “rounds”. We also include “0” in the search space, which if chosen reverts to using the SQIL reward function."
+        - paragraph [ref=f9e2379]:
+          - text: DRIL options include the quantile cutoff
+          - math [ref=f9e2380]:
+            - generic [ref=f9e2382]:
+              - generic [ref=f9e2383]: ∈
+              - generic [ref=f9e2384]:
+                - generic [ref=f9e2385]: "["
+                - generic [ref=f9e2386]:
+                  - generic [ref=f9e2387]: "0"
+                  - generic [ref=f9e2388]: ","
+                  - generic [ref=f9e2389]: "1"
+                - generic [ref=f9e2390]: "]"
+          - text: . As per the original work
+          - generic [ref=f9e2391]:
+            - text: (
+            - link "Brantley et al. 2020" [ref=f9e2392] [cursor=pointer]:
+              - /url: "#bib.bib8"
+            - text: )
+          - text: ", we include an auxiliary BC loss during training. For simplicity we use the dropout ensemble. As using absorbing state indicators requires importance sampling, we adapt the BC loss used within DRIL to account for importance weights."
+        - paragraph [ref=f9e2394]:
+          - text: GAIL options include reward shaping
+          - generic [ref=f9e2395]:
+            - text: (
+            - link "Fu et al. 2018" [ref=f9e2396] [cursor=pointer]:
+              - /url: "#bib.bib17"
+            - text: )
+          - text: ", subtracting"
+          - math [ref=f9e2397]:
+            - generic [ref=f9e2399]:
+              - generic [ref=f9e2400]:
+                - generic [ref=f9e2401]: log
+                - generic: ⁡
+                - generic [ref=f9e2402]:
+                  - generic [ref=f9e2403]: π
+                  - generic [ref=f9e2404]: ^
+              - generic [ref=f9e2405]:
+                - generic [ref=f9e2406]: (
+                - generic [ref=f9e2407]: a
+                - generic [ref=f9e2408]: "|"
+                - generic [ref=f9e2409]: s
+                - generic [ref=f9e2410]: )
+          - text: from the predicted reward
+          - generic [ref=f9e2411]:
+            - text: (
+            - link "Fu et al. 2018" [ref=f9e2412] [cursor=pointer]:
+              - /url: "#bib.bib17"
+            - text: )
+          - text: ", the GAIL, AIRL and FAIRL reward functions"
+          - generic [ref=f9e2413]:
+            - text: (
+            - link "Ho and Ermon 2016" [ref=f9e2414] [cursor=pointer]:
+              - /url: "#bib.bib26"
+            - text: ;
+            - link "Fu et al. 2018" [ref=f9e2415] [cursor=pointer]:
+              - /url: "#bib.bib17"
+            - text: ;
+            - link "Ghasemipour et al. 2020" [ref=f9e2416] [cursor=pointer]:
+              - /url: "#bib.bib20"
+            - text: )
+          - text: ", discriminator gradient penalty"
+          - generic [ref=f9e2417]:
+            - text: (
+            - link "Kostrikov et al. 2019" [ref=f9e2418] [cursor=pointer]:
+              - /url: "#bib.bib32"
+            - text: ;
+            - link "Blondé and Kalousis 2019" [ref=f9e2419] [cursor=pointer]:
+              - /url: "#bib.bib6"
+            - text: )
+          - text: ", discriminator spectral normalisation"
+          - generic [ref=f9e2420]:
+            - text: (
+            - link "Blondé et al. 2022" [ref=f9e2421] [cursor=pointer]:
+              - /url: "#bib.bib7"
+            - text: )
+          - text: ", discriminator entropy bonus"
+          - math [ref=f9e2422]:
+            - generic [ref=f9e2424]:
+              - generic [ref=f9e2425]: ≥
+              - generic [ref=f9e2426]: "0"
+          - generic [ref=f9e2427]:
+            - text: (
+            - link "Orsini et al. 2021" [ref=f9e2428] [cursor=pointer]:
+              - /url: "#bib.bib43"
+            - text: )
+          - text: ", binary cross-entropy, Mixup, and nn-PUGAIL discriminator loss functions"
+          - generic [ref=f9e2429]:
+            - text: (
+            - link "Ho and Ermon 2016" [ref=f9e2430] [cursor=pointer]:
+              - /url: "#bib.bib26"
+            - text: ;
+            - link "Chen et al. 2021" [ref=f9e2431] [cursor=pointer]:
+              - /url: "#bib.bib11"
+            - text: ;
+            - link "Xu and Denil 2021" [ref=f9e2432] [cursor=pointer]:
+              - /url: "#bib.bib60"
+            - text: )
+          - text: ", and 3 additional hyperparameters for these loss functions (Mixup alpha"
+          - math [ref=f9e2433]:
+            - generic [ref=f9e2435]:
+              - generic [ref=f9e2436]: ≥
+              - generic [ref=f9e2437]: "0"
+          - text: ", positive class prior"
+          - math [ref=f9e2438]:
+            - generic [ref=f9e2440]:
+              - generic [ref=f9e2441]: ≥
+              - generic [ref=f9e2442]: "0"
+              - generic [ref=f9e2443]: ","
+              - generic [ref=f9e2444]: ≤
+              - generic [ref=f9e2445]: "1"
+          - text: ", and non-negative margin"
+          - math [ref=f9e2446]:
+            - generic [ref=f9e2448]:
+              - generic [ref=f9e2449]: ≥
+              - generic [ref=f9e2450]: "0"
+          - text: ).
+        - paragraph [ref=f9e2452]:
+          - text: To adapt GMMIL for absorbing states, we adapt it to use the weighted MMD
+          - generic [ref=f9e2453]:
+            - text: (
+            - link "Yan et al. 2017" [ref=f9e2454] [cursor=pointer]:
+              - /url: "#bib.bib61"
+            - text: )
+          - text: . Due to the
+          - math [ref=f9e2455]:
+            - generic [ref=f9e2457]:
+              - generic [ref=f9e2458]: O
+              - generic: ⁡
+              - generic [ref=f9e2459]:
+                - generic [ref=f9e2460]: (
+                - generic [ref=f9e2461]:
+                  - generic [ref=f9e2462]:
+                    - generic [ref=f9e2463]: M
+                    - generic [ref=f9e2464]: "N"
+                  - generic [ref=f9e2465]: ⋅
+                  - generic [ref=f9e2466]:
+                    - generic [ref=f9e2467]: dim
+                    - generic [ref=f9e2468]:
+                      - generic [ref=f9e2469]: (
+                      - generic [ref=f9e2470]: X
+                      - generic [ref=f9e2471]: )
+                - generic [ref=f9e2472]: )
+          - text: complexity of MMD, it is prohibitive to use the entire expert dataset per update in the off-policy setting, and hence we randomly sample a batch of expert transitions per update. For this reason we also restrict the maximum batch size of GMMIL’s hyperparameter search space.
+        - paragraph [ref=f9e2474]:
+          - text: PWIL options include the reward scale
+          - math [ref=f9e2475]:
+            - generic [ref=f9e2477]:
+              - generic [ref=f9e2478]: α
+              - generic [ref=f9e2479]: ≥
+              - generic [ref=f9e2480]: "0"
+          - text: and reward bandwidth scale
+          - math [ref=f9e2481]:
+            - generic [ref=f9e2483]:
+              - generic [ref=f9e2484]: β
+              - generic [ref=f9e2485]: ≥
+              - generic [ref=f9e2486]: "0"
+          - text: . To make PWIL more comparable to the other algorithms, we use the “nofill” variant, which does not prefill the replay buffer with expert transitions
+          - generic [ref=f9e2487]:
+            - text: (
+            - link "Dadashi et al. 2021" [ref=f9e2488] [cursor=pointer]:
+              - /url: "#bib.bib12"
+            - text: )
+          - text: .
+        - paragraph [ref=f9e2490]: To adapt RED for absorbing states, we train its discriminator with a weighted MSE loss.
+        - paragraph [ref=f9e2492]: The hyperparameter search spaces and optimised hyperparameters can be found documented in the codebase.
+      - generic [ref=f9e2493]:
+        - heading "3.3 Results" [level=3] [ref=f9e2494]:
+          - generic [ref=f9e2495]: "3.3"
+          - text: Results
+        - paragraph [ref=f9e2497]:
+          - text: All IL algorithms (except BC) are trained with
+          - math [ref=f9e2498]:
+            - generic [ref=f9e2500]:
+              - generic [ref=f9e2501]: "10"
+              - generic [ref=f9e2502]: "6"
+          - text: environment interaction steps, and are evaluated 30 times with a deterministic policy every
+          - math [ref=f9e2503]:
+            - generic [ref=f9e2505]:
+              - generic [ref=f9e2506]: "10"
+              - generic [ref=f9e2507]: "4"
+          - text: steps. To aggregate test returns, we calculate the interquartile mean (IQM) over the 30 evaluation episodes, and then once again over seeds, reporting the final IQM ± 95% confidence interval (CI) using 1000 stratified bootstrap samples
+          - generic [ref=f9e2508]:
+            - text: (
+            - link "Agarwal et al. 2021" [ref=f9e2509] [cursor=pointer]:
+              - /url: "#bib.bib1"
+            - text: )
+          - text: . The final returns over all environments are reported in Table
+          - link "2" [ref=f9e2510] [cursor=pointer]:
+            - /url: "#S3.T2"
+          - text: .
+          - superscript [ref=f9e2512]: "10"
+          - text: We also show performance over time in Figure
+          - link "1" [ref=f9e2513] [cursor=pointer]:
+            - /url: "#S3.F1"
+          - text: ", where the returns are aggregated over environments, normalised by the D4RL environment min and max reference scores:"
+          - math [ref=f9e2514]:
+            - generic [ref=f9e2516]:
+              - generic [ref=f9e2517]: normalised score
+              - generic [ref=f9e2518]: =
+              - generic [ref=f9e2519]:
+                - generic [ref=f9e2520]: score - random score
+                - generic [ref=f9e2521]: expert score - random score
+          - text: ", with the reference scores produced by random and expert agents."
+        - 'figure "Figure 1: Normalised scores over different trajectory budgets (IQM ± 95% CI). GAIL performs well across all budgets, with AdRIL performing joint-best for high budgets. AdRIL’s weakness is its sensitivity to the discriminator update frequency, which can cause policy collapse if not tuned well. PWIL is reasonably strong across budgets. BC is a strong baseline for high budgets." [ref=f9e2522]':
+          - img "Refer to caption" [ref=f9e2523]
+          - generic [ref=f9e2524]:
+            - generic [ref=f9e2525]: "Figure 1:"
+            - text: Normalised scores over different trajectory budgets (IQM ± 95% CI). GAIL performs well across all budgets, with AdRIL performing joint-best for high budgets. AdRIL’s weakness is its sensitivity to the discriminator update frequency, which can cause policy collapse if not tuned well. PWIL is reasonably strong across budgets. BC is a strong baseline for high budgets.
+        - 'figure "Table 2: Returns over different trajectory budgets and environments (IQM ± 95% CI). Optimising for minimum regret across all environments results in hyperparameter choices that are suboptimal for individual environments. Although GAIL performs the best over all trajectory budgets for most environments, AdRIL is always the most effective in the Hopper environment." [ref=f9e2526]':
+          - generic [ref=f9e2527]:
+            - generic [ref=f9e2528]: "Table 2:"
+            - text: Returns over different trajectory budgets and environments (IQM ± 95% CI). Optimising for minimum regret across all environments results in hyperparameter choices that are suboptimal for individual environments. Although GAIL performs the best over all trajectory budgets for most environments, AdRIL is always the most effective in the Hopper environment.
+          - table [ref=f9e2531]:
+            - rowgroup [ref=f9e2532]:
+              - row [ref=f9e2533]:
+                - columnheader "# Trajectories" [ref=f9e2534]
+                - columnheader [ref=f9e2535]
+                - columnheader "Ant" [ref=f9e2536]
+                - columnheader "HalfCheetah" [ref=f9e2537]
+                - columnheader "Hopper" [ref=f9e2538]
+                - columnheader "Walker2D" [ref=f9e2539]
+              - row [ref=f9e2540]:
+                - columnheader [ref=f9e2541]
+                - columnheader "SAC" [ref=f9e2542]
+                - columnheader [ref=f9e2543]:
+                  - math [ref=f9e2544]:
+                    - generic [ref=f9e2545]: 5155.97±812.74
+                - columnheader [ref=f9e2547]:
+                  - math [ref=f9e2548]:
+                    - generic [ref=f9e2549]: 13994.64±2304.52
+                - columnheader [ref=f9e2551]:
+                  - math [ref=f9e2552]:
+                    - generic [ref=f9e2553]: 2086.81±608.70
+                - columnheader [ref=f9e2555]:
+                  - math [ref=f9e2556]:
+                    - generic [ref=f9e2557]: 5903.79±340.09
+            - rowgroup [ref=f9e2559]:
+              - row [ref=f9e2560]:
+                - columnheader "5" [ref=f9e2561]
+                - rowheader "BC" [ref=f9e2562]
+                - cell [ref=f9e2563]:
+                  - math [ref=f9e2564]:
+                    - generic [ref=f9e2565]: 587.82±255.80
+                - cell [ref=f9e2567]:
+                  - math [ref=f9e2568]:
+                    - generic [ref=f9e2569]: 52.48±153.96
+                - cell [ref=f9e2571]:
+                  - math [ref=f9e2572]:
+                    - generic [ref=f9e2573]: 701.03±134.96
+                - cell [ref=f9e2575]:
+                  - math [ref=f9e2576]:
+                    - generic [ref=f9e2577]: 909.28±558.42
+              - row [ref=f9e2579]:
+                - rowheader "AdRIL" [ref=f9e2580]
+                - cell [ref=f9e2581]:
+                  - math [ref=f9e2582]:
+                    - generic [ref=f9e2583]: 1191.88±787.27
+                - cell [ref=f9e2585]:
+                  - math [ref=f9e2586]:
+                    - generic [ref=f9e2587]: 36.58±60.07
+                - cell [ref=f9e2589]:
+                  - math [ref=f9e2590]:
+                    - generic [ref=f9e2592]:
+                      - generic [ref=f9e2593]: "3584.20"
+                      - generic [ref=f9e2594]: ±
+                      - generic [ref=f9e2595]: "30.61"
+                - cell [ref=f9e2596]:
+                  - math [ref=f9e2597]:
+                    - generic [ref=f9e2598]: 169.10±576.42
+              - row [ref=f9e2600]:
+                - rowheader "DRIL" [ref=f9e2601]
+                - cell [ref=f9e2602]:
+                  - math [ref=f9e2603]:
+                    - generic [ref=f9e2605]:
+                      - generic [ref=f9e2606]: −
+                      - generic [ref=f9e2607]: 89.15±84.87
+                - cell [ref=f9e2608]:
+                  - math [ref=f9e2609]:
+                    - generic [ref=f9e2611]:
+                      - generic [ref=f9e2612]: −
+                      - generic [ref=f9e2613]: 63.48±20.80
+                - cell [ref=f9e2614]:
+                  - math [ref=f9e2615]:
+                    - generic [ref=f9e2616]: 367.35±324.27
+                - cell [ref=f9e2618]:
+                  - math [ref=f9e2619]:
+                    - generic [ref=f9e2621]:
+                      - generic [ref=f9e2622]: −
+                      - generic [ref=f9e2623]: 20.69±58.24
+              - row [ref=f9e2624]:
+                - rowheader "GAIL" [ref=f9e2625]
+                - cell [ref=f9e2626]:
+                  - math [ref=f9e2627]:
+                    - generic [ref=f9e2629]:
+                      - generic [ref=f9e2630]: "5439.19"
+                      - generic [ref=f9e2631]: ±
+                      - generic [ref=f9e2632]: "253.85"
+                - cell [ref=f9e2633]:
+                  - math [ref=f9e2634]:
+                    - generic [ref=f9e2636]:
+                      - generic [ref=f9e2637]: "11238.76"
+                      - generic [ref=f9e2638]: ±
+                      - generic [ref=f9e2639]: "217.55"
+                - cell [ref=f9e2640]:
+                  - math [ref=f9e2641]:
+                    - generic [ref=f9e2642]: 3517.76±178.49
+                - cell [ref=f9e2644]:
+                  - math [ref=f9e2645]:
+                    - generic [ref=f9e2647]:
+                      - generic [ref=f9e2648]: "5110.03"
+                      - generic [ref=f9e2649]: ±
+                      - generic [ref=f9e2650]: "66.72"
+              - row [ref=f9e2651]:
+                - rowheader "GMMIL" [ref=f9e2652]
+                - cell [ref=f9e2653]:
+                  - math [ref=f9e2654]:
+                    - generic [ref=f9e2655]: 575.01±903.94
+                - cell [ref=f9e2657]:
+                  - math [ref=f9e2658]:
+                    - generic [ref=f9e2659]: 299.80±272.75
+                - cell [ref=f9e2661]:
+                  - math [ref=f9e2662]:
+                    - generic [ref=f9e2663]: 820.35±488.22
+                - cell [ref=f9e2665]:
+                  - math [ref=f9e2666]:
+                    - generic [ref=f9e2667]: 60.05±56.30
+              - row [ref=f9e2669]:
+                - rowheader "PWIL" [ref=f9e2670]
+                - cell [ref=f9e2671]:
+                  - math [ref=f9e2672]:
+                    - generic [ref=f9e2673]: 3168.17±1285.61
+                - cell [ref=f9e2675]:
+                  - math [ref=f9e2676]:
+                    - generic [ref=f9e2677]: 10775.81±386.64
+                - cell [ref=f9e2679]:
+                  - math [ref=f9e2680]:
+                    - generic [ref=f9e2681]: 3529.61±32.47
+                - cell [ref=f9e2683]:
+                  - math [ref=f9e2684]:
+                    - generic [ref=f9e2685]: 3678.89±167.96
+              - row [ref=f9e2687]:
+                - rowheader "RED" [ref=f9e2688]
+                - cell [ref=f9e2689]:
+                  - math [ref=f9e2690]:
+                    - generic [ref=f9e2692]:
+                      - generic [ref=f9e2693]: −
+                      - generic [ref=f9e2694]: 90.94±252.32
+                - cell [ref=f9e2695]:
+                  - math [ref=f9e2696]:
+                    - generic [ref=f9e2698]:
+                      - generic [ref=f9e2699]: −
+                      - generic [ref=f9e2700]: 111.72±466.09
+                - cell [ref=f9e2701]:
+                  - math [ref=f9e2702]:
+                    - generic [ref=f9e2703]: 2500.67±1024.09
+                - cell [ref=f9e2705]:
+                  - math [ref=f9e2706]:
+                    - generic [ref=f9e2707]: 1052.36±184.32
+              - row [ref=f9e2709]:
+                - columnheader "10" [ref=f9e2710]
+                - rowheader "BC" [ref=f9e2711]
+                - cell [ref=f9e2712]:
+                  - math [ref=f9e2713]:
+                    - generic [ref=f9e2714]: 2178.80±311.20
+                - cell [ref=f9e2716]:
+                  - math [ref=f9e2717]:
+                    - generic [ref=f9e2718]: 184.06±176.27
+                - cell [ref=f9e2720]:
+                  - math [ref=f9e2721]:
+                    - generic [ref=f9e2722]: 1139.22±559.33
+                - cell [ref=f9e2724]:
+                  - math [ref=f9e2725]:
+                    - generic [ref=f9e2726]: 4687.82±380.03
+              - row [ref=f9e2728]:
+                - rowheader "AdRIL" [ref=f9e2729]
+                - cell [ref=f9e2730]:
+                  - math [ref=f9e2731]:
+                    - generic [ref=f9e2732]: 115.84±520.84
+                - cell [ref=f9e2734]:
+                  - math [ref=f9e2735]:
+                    - generic [ref=f9e2736]: 5957.19±2747.32
+                - cell [ref=f9e2738]:
+                  - math [ref=f9e2739]:
+                    - generic [ref=f9e2741]:
+                      - generic [ref=f9e2742]: "3594.14"
+                      - generic [ref=f9e2743]: ±
+                      - generic [ref=f9e2744]: "8.50"
+                - cell [ref=f9e2745]:
+                  - math [ref=f9e2746]:
+                    - generic [ref=f9e2747]: 2267.06±2121.80
+              - row [ref=f9e2749]:
+                - rowheader "DRIL" [ref=f9e2750]
+                - cell [ref=f9e2751]:
+                  - math [ref=f9e2752]:
+                    - generic [ref=f9e2754]:
+                      - generic [ref=f9e2755]: −
+                      - generic [ref=f9e2756]: 318.65±104.92
+                - cell [ref=f9e2757]:
+                  - math [ref=f9e2758]:
+                    - generic [ref=f9e2760]:
+                      - generic [ref=f9e2761]: −
+                      - generic [ref=f9e2762]: 117.86±32.44
+                - cell [ref=f9e2763]:
+                  - math [ref=f9e2764]:
+                    - generic [ref=f9e2765]: 37.51±103.46
+                - cell [ref=f9e2767]:
+                  - math [ref=f9e2768]:
+                    - generic [ref=f9e2770]:
+                      - generic [ref=f9e2771]: −
+                      - generic [ref=f9e2772]: 12.32±8.58
+              - row [ref=f9e2773]:
+                - rowheader "GAIL" [ref=f9e2774]
+                - cell [ref=f9e2775]:
+                  - math [ref=f9e2776]:
+                    - generic [ref=f9e2778]:
+                      - generic [ref=f9e2779]: "5368.46"
+                      - generic [ref=f9e2780]: ±
+                      - generic [ref=f9e2781]: "54.49"
+                - cell [ref=f9e2782]:
+                  - math [ref=f9e2783]:
+                    - generic [ref=f9e2785]:
+                      - generic [ref=f9e2786]: "11571.12"
+                      - generic [ref=f9e2787]: ±
+                      - generic [ref=f9e2788]: "154.39"
+                - cell [ref=f9e2789]:
+                  - math [ref=f9e2790]:
+                    - generic [ref=f9e2791]: 3580.90±85.99
+                - cell [ref=f9e2793]:
+                  - math [ref=f9e2794]:
+                    - generic [ref=f9e2796]:
+                      - generic [ref=f9e2797]: "5041.87"
+                      - generic [ref=f9e2798]: ±
+                      - generic [ref=f9e2799]: "51.92"
+              - row [ref=f9e2800]:
+                - rowheader "GMMIL" [ref=f9e2801]
+                - cell [ref=f9e2802]:
+                  - math [ref=f9e2803]:
+                    - generic [ref=f9e2804]: 590.47±1022.66
+                - cell [ref=f9e2806]:
+                  - math [ref=f9e2807]:
+                    - generic [ref=f9e2808]: 448.40±643.33
+                - cell [ref=f9e2810]:
+                  - math [ref=f9e2811]:
+                    - generic [ref=f9e2812]: 1325.33±307.86
+                - cell [ref=f9e2814]:
+                  - math [ref=f9e2815]:
+                    - generic [ref=f9e2816]: 235.79±196.27
+              - row [ref=f9e2818]:
+                - rowheader "PWIL" [ref=f9e2819]
+                - cell [ref=f9e2820]:
+                  - math [ref=f9e2821]:
+                    - generic [ref=f9e2822]: 5133.04±72.93
+                - cell [ref=f9e2824]:
+                  - math [ref=f9e2825]:
+                    - generic [ref=f9e2826]: 10591.22±1204.07
+                - cell [ref=f9e2828]:
+                  - math [ref=f9e2829]:
+                    - generic [ref=f9e2830]: 3558.52±224.55
+                - cell [ref=f9e2832]:
+                  - math [ref=f9e2833]:
+                    - generic [ref=f9e2834]: 4185.11±490.59
+              - row [ref=f9e2836]:
+                - rowheader "RED" [ref=f9e2837]
+                - cell [ref=f9e2838]:
+                  - math [ref=f9e2839]:
+                    - generic [ref=f9e2840]: 6.15±168.53
+                - cell [ref=f9e2842]:
+                  - math [ref=f9e2843]:
+                    - generic [ref=f9e2844]: 978.77±408.87
+                - cell [ref=f9e2846]:
+                  - math [ref=f9e2847]:
+                    - generic [ref=f9e2848]: 322.68±62.43
+                - cell [ref=f9e2850]:
+                  - math [ref=f9e2851]:
+                    - generic [ref=f9e2852]: 216.50±197.14
+              - row [ref=f9e2854]:
+                - columnheader "25" [ref=f9e2855]
+                - rowheader "BC" [ref=f9e2856]
+                - cell [ref=f9e2857]:
+                  - math [ref=f9e2858]:
+                    - generic [ref=f9e2859]: 4698.29±207.67
+                - cell [ref=f9e2861]:
+                  - math [ref=f9e2862]:
+                    - generic [ref=f9e2863]: 5550.51±1780.47
+                - cell [ref=f9e2865]:
+                  - math [ref=f9e2866]:
+                    - generic [ref=f9e2867]: 3271.88±369.44
+                - cell [ref=f9e2869]:
+                  - math [ref=f9e2870]:
+                    - generic [ref=f9e2871]: 4955.85±21.21
+              - row [ref=f9e2873]:
+                - rowheader "AdRIL" [ref=f9e2874]
+                - cell [ref=f9e2875]:
+                  - math [ref=f9e2876]:
+                    - generic [ref=f9e2877]: 5246.33±70.14
+                - cell [ref=f9e2879]:
+                  - math [ref=f9e2880]:
+                    - generic [ref=f9e2881]: 11244.16±129.42
+                - cell [ref=f9e2883]:
+                  - math [ref=f9e2884]:
+                    - generic [ref=f9e2886]:
+                      - generic [ref=f9e2887]: "3579.96"
+                      - generic [ref=f9e2888]: ±
+                      - generic [ref=f9e2889]: "12.15"
+                - cell [ref=f9e2890]:
+                  - math [ref=f9e2891]:
+                    - generic [ref=f9e2892]: 4962.86±15.00
+              - row [ref=f9e2894]:
+                - rowheader "DRIL" [ref=f9e2895]
+                - cell [ref=f9e2896]:
+                  - math [ref=f9e2897]:
+                    - generic [ref=f9e2898]: 1077.66±475.96
+                - cell [ref=f9e2900]:
+                  - math [ref=f9e2901]:
+                    - generic [ref=f9e2903]:
+                      - generic [ref=f9e2904]: −
+                      - generic [ref=f9e2905]: 60.11±27.60
+                - cell [ref=f9e2906]:
+                  - math [ref=f9e2907]:
+                    - generic [ref=f9e2908]: 9.24±1.16
+                - cell [ref=f9e2910]:
+                  - math [ref=f9e2911]:
+                    - generic [ref=f9e2913]:
+                      - generic [ref=f9e2914]: −
+                      - generic [ref=f9e2915]: 29.86±10.68
+              - row [ref=f9e2916]:
+                - rowheader "GAIL" [ref=f9e2917]
+                - cell [ref=f9e2918]:
+                  - math [ref=f9e2919]:
+                    - generic [ref=f9e2921]:
+                      - generic [ref=f9e2922]: "5557.74"
+                      - generic [ref=f9e2923]: ±
+                      - generic [ref=f9e2924]: "81.01"
+                - cell [ref=f9e2925]:
+                  - math [ref=f9e2926]:
+                    - generic [ref=f9e2928]:
+                      - generic [ref=f9e2929]: "11392.09"
+                      - generic [ref=f9e2930]: ±
+                      - generic [ref=f9e2931]: "377.15"
+                - cell [ref=f9e2932]:
+                  - math [ref=f9e2933]:
+                    - generic [ref=f9e2934]: 3467.73±299.07
+                - cell [ref=f9e2936]:
+                  - math [ref=f9e2937]:
+                    - generic [ref=f9e2939]:
+                      - generic [ref=f9e2940]: "5055.76"
+                      - generic [ref=f9e2941]: ±
+                      - generic [ref=f9e2942]: "64.13"
+              - row [ref=f9e2943]:
+                - rowheader "GMMIL" [ref=f9e2944]
+                - cell [ref=f9e2945]:
+                  - math [ref=f9e2946]:
+                    - generic [ref=f9e2948]:
+                      - generic [ref=f9e2949]: −
+                      - generic [ref=f9e2950]: 7.81±176.54
+                - cell [ref=f9e2951]:
+                  - math [ref=f9e2952]:
+                    - generic [ref=f9e2953]: 620.01±319.07
+                - cell [ref=f9e2955]:
+                  - math [ref=f9e2956]:
+                    - generic [ref=f9e2957]: 854.59±244.31
+                - cell [ref=f9e2959]:
+                  - math [ref=f9e2960]:
+                    - generic [ref=f9e2961]: 13.29±48.66
+              - row [ref=f9e2963]:
+                - rowheader "PWIL" [ref=f9e2964]
+                - cell [ref=f9e2965]:
+                  - math [ref=f9e2966]:
+                    - generic [ref=f9e2967]: 5040.18±114.00
+                - cell [ref=f9e2969]:
+                  - math [ref=f9e2970]:
+                    - generic [ref=f9e2971]: 10785.65±170.43
+                - cell [ref=f9e2973]:
+                  - math [ref=f9e2974]:
+                    - generic [ref=f9e2975]: 3418.18±434.71
+                - cell [ref=f9e2977]:
+                  - math [ref=f9e2978]:
+                    - generic [ref=f9e2979]: 3855.43±296.41
+              - row [ref=f9e2981]:
+                - rowheader "RED" [ref=f9e2982]
+                - cell [ref=f9e2983]:
+                  - math [ref=f9e2984]:
+                    - generic [ref=f9e2985]: 284.14±181.12
+                - cell [ref=f9e2987]:
+                  - math [ref=f9e2988]:
+                    - generic [ref=f9e2990]:
+                      - generic [ref=f9e2991]: −
+                      - generic [ref=f9e2992]: 62.76±181.27
+                - cell [ref=f9e2993]:
+                  - math [ref=f9e2994]:
+                    - generic [ref=f9e2995]: 323.86±22.49
+                - cell [ref=f9e2997]:
+                  - math [ref=f9e2998]:
+                    - generic [ref=f9e2999]: 246.23±165.69
+        - paragraph [ref=f9e3002]:
+          - text: Overall, GAIL performs robustly across all trajectory budgets, presumably due to the large amount of research that has gone into improving the performance and robustness of adversarial IL methods. However, AdRIL, which is practically much simpler (and faster), performs the same (with higher sample efficiency) with higher budgets, as near-expert data from the agent is less likely to overpower the effect of the expert data. This can also be seen in the hyperparameter optimisation, with the discriminator update frequency going from 0 (reverting to the SQIL reward function) to 12500 to 25000 as the trajectory budget increased. PWIL also performed well across budgets. Hyperparameter optimisation set the reward (
+          - math [ref=f9e3003]:
+            - generic [ref=f9e3004]: α
+          - text: ) and reward bandwidth (
+          - math [ref=f9e3006]:
+            - generic [ref=f9e3007]: β
+          - text: ) scales to 1 for 5 trajectories, but increased the values for these for 10 and 25 trajectories. However, we note that since each environment step requires computing the reward between the current state-action pair and a subset of the expert data, starting with the entire dataset at the start of each episode, it is computationally expensive for high budgets. BC scales well as the number of trajectories increase.
+        - paragraph [ref=f9e3010]:
+          - text: Unfortunately, we were unable to successfully optimise off-policy versions of DRIL, GMMIL and RED. In an early version of our codebase we were able to optimise their original, on-policy versions successfully, so with considerable effort put into hyperparameter tuning and trying additional regularisation strategies, we believe that their is some fundamental issue caused from going from training on on-policy to off-policy returns. One would expect that for successful training the inferred rewards for the agent’s trajectories should increase over time, but this was observed for runs of these methods as well, and is therefore not predictive of successful imitation. Q-values are a function of the predicted rewards, so did not provide further diagnostic insights. We also created variants of DRIL and RED in which the discriminators were trained online, similarly to GAIL, but were unsuccessful; however, there are many ways to do so, and our attempts do not preclude a successful online discriminator variant from being developed. Finally, we note that DRIL performs better at the start of training, which we can attribute to the BC auxiliary loss; experiments with uncertainty-only DRIL
+          - generic [ref=f9e3011]:
+            - text: (
+            - link "Brantley et al. 2020" [ref=f9e3012] [cursor=pointer]:
+              - /url: "#bib.bib8"
+            - text: ", UO-DRIL;)"
+          - text: did not show this trend, with scores remaining low during the entirety of training.
+        - paragraph [ref=f9e3014]: Some weak trends we noticed from hyperparameter optimisation were that both batch and discriminator sizes increased with the trajectory budget. We hypothesise that the former is due to added stochasticity in optimisation aiding when data is scarce, whilst the latter is due to the need to prevent overfitting in low-data regimes. However, we caution that these trends do not always hold, as, for example, the optimal batch size for GAIL decreased with the trajectory budget.
+    - generic [ref=f9e3015]:
+      - heading "4 Discussion" [level=2] [ref=f9e3016]:
+        - generic [ref=f9e3017]: "4"
+        - text: Discussion
+      - paragraph [ref=f9e3019]:
+        - text: In this paper, we took a pragmatic look at deep IL methods, reviewing the relationships between the different approaches, updated older methods to use more data-efficient off-policy RL algorithms, and finally performed a fair comparison between them on a standard benchmark. As BC is simple and does not involve environment interaction, we recommend that it should always be considered as a baseline. AdRIL is an attractive option for deep IL due to its simplicity and strong performance, although it has one critical hyperparameter that needs tuning. And although the myriad of options for GAIL make it more complicated to work with, we have empirical data on what does and doesn’t work
+        - generic [ref=f9e3020]:
+          - text: (
+          - link "Orsini et al. 2021" [ref=f9e3021] [cursor=pointer]:
+            - /url: "#bib.bib43"
+          - text: )
+        - text: .
+      - paragraph [ref=f9e3023]:
+        - text: Although we were only able to test extensively on standard environments with expert data, we plan to release our framework to enable further, fair experiments on different environments, datasets, algorithms. Valuable open questions in the field of IL remain in the use of proxy reward functions for evaluating IL
+        - generic [ref=f9e3024]:
+          - text: (
+          - link "Hussenot et al. 2021" [ref=f9e3025] [cursor=pointer]:
+            - /url: "#bib.bib28"
+          - text: )
+        - text: ", and how best to learn from human demonstration data"
+        - generic [ref=f9e3026]:
+          - text: (
+          - link "Orsini et al. 2021" [ref=f9e3027] [cursor=pointer]:
+            - /url: "#bib.bib43"
+          - text: )
+        - text: .
+      - generic [ref=f9e3028]:
+        - heading "acknowledgments-disclosure-of-funding." [level=6] [ref=f9e3029]
+        - text: This work was supported by JST, Moonshot R&D Grant Number JPMJMS2012.
+    - generic [ref=f9e3030]:
+      - heading "References" [level=2] [ref=f9e3031]
+      - list [ref=f9e3032]:
+        - listitem [ref=f9e3033]:
+          - text: Agarwal et al. (2021) Rishabh Agarwal, Max Schwarzer, Pablo Samuel Castro, Aaron C Courville, and Marc Bellemare. Deep Reinforcement Learning at the Edge of the Statistical Precipice.
+          - generic [ref=f9e3034]:
+            - text: In
+            - emphasis [ref=f9e3035]: NeurIPS
+            - text: ", 2021."
+        - listitem [ref=f9e3036]:
+          - text: Andrychowicz et al. (2021) Marcin Andrychowicz, Anton Raichuk, Piotr Stańczyk, Manu Orsini, Sertan Girgin, Raphael Marinier, Léonard Hussenot, Matthieu Geist, Olivier Pietquin, Marcin Michalski, et al. What Matters in On-policy Reinforcement Learning? A Large-scale Empirical Study.
+          - generic [ref=f9e3037]:
+            - text: In
+            - emphasis [ref=f9e3038]: ICLR
+            - text: ", 2021."
+        - listitem [ref=f9e3039]:
+          - text: "Arora and Doshi (2021) Saurabh Arora and Prashant Doshi. A Survey of Inverse Reinforcement Learning: Challenges, Methods and Progress."
+          - generic [ref=f9e3040]:
+            - emphasis [ref=f9e3041]: Artif. Intell.
+            - text: ", 297:103500, 2021."
+        - listitem [ref=f9e3042]:
+          - text: "Arulkumaran et al. (2017) Kai Arulkumaran, Marc Peter Deisenroth, Miles Brundage, and Anil Anthony Bharath. Deep Reinforcement Learning: A Brief Survey."
+          - generic [ref=f9e3043]:
+            - emphasis [ref=f9e3044]: IEEE SPM
+            - text: ", 34(6):26–38, 2017."
+        - listitem [ref=f9e3045]:
+          - text: "Balandat et al. (2020) Maximilian Balandat, Brian Karrer, Daniel Jiang, Samuel Daulton, Ben Letham, Andrew G Wilson, and Eytan Bakshy. BoTorch: A Framework for Efficient Monte-Carlo Bayesian Optimization."
+          - generic [ref=f9e3046]:
+            - text: In
+            - emphasis [ref=f9e3047]: NeurIPS
+            - text: ", 2020."
+        - listitem [ref=f9e3048]:
+          - text: Blondé and Kalousis (2019) Lionel Blondé and Alexandros Kalousis. Sample-efficient Imitation Learning via Generative Adversarial Nets.
+          - generic [ref=f9e3049]:
+            - text: In
+            - emphasis [ref=f9e3050]: AISTATS
+            - text: ", 2019."
+        - listitem [ref=f9e3051]:
+          - text: Blondé et al. (2022) Lionel Blondé, Pablo Strasser, and Alexandros Kalousis. Lipschitzness is All You Need to Tame Off-policy Generative Adversarial Imitation Learning.
+          - generic [ref=f9e3052]:
+            - emphasis [ref=f9e3053]: Mach. Learn.
+            - text: ", 111(4):1431–1521, 2022."
+        - listitem [ref=f9e3054]:
+          - text: Brantley et al. (2020) Kianté Brantley, Wen Sun, and Mikael Henaff. Disagreement-regularized Imitation Learning.
+          - generic [ref=f9e3055]:
+            - text: In
+            - emphasis [ref=f9e3056]: ICLR
+            - text: ", 2020."
+        - listitem [ref=f9e3057]:
+          - text: Brockman et al. (2016) Greg Brockman, Vicki Cheung, Ludwig Pettersson, Jonas Schneider, John Schulman, Jie Tang, and Wojciech Zaremba. OpenAI Gym.
+          - generic [ref=f9e3058]:
+            - emphasis [ref=f9e3059]: arXiv:1606.01540
+            - text: ", 2016."
+        - listitem [ref=f9e3060]:
+          - text: Burda et al. (2018) Yuri Burda, Harrison Edwards, Amos Storkey, and Oleg Klimov. Exploration by Random Network Distillation.
+          - generic [ref=f9e3061]:
+            - text: In
+            - emphasis [ref=f9e3062]: ICLR
+            - text: ", 2018."
+        - listitem [ref=f9e3063]:
+          - text: Chen et al. (2021) Annie S Chen, HyunJi Nam, Suraj Nair, and Chelsea Finn. Batch Exploration with Examples for Scalable Robotic Reinforcement Learning.
+          - generic [ref=f9e3064]:
+            - emphasis [ref=f9e3065]: IEEE RA-L
+            - text: ", 6(3):4401–4408, 2021."
+        - listitem [ref=f9e3066]:
+          - text: Dadashi et al. (2021) Robert Dadashi, Leonard Hussenot, Matthieu Geist, and Olivier Pietquin. Primal Wasserstein Imitation Learning.
+          - generic [ref=f9e3067]:
+            - text: In
+            - emphasis [ref=f9e3068]: ICLR
+            - text: ", 2021."
+        - listitem [ref=f9e3069]:
+          - text: Daumé et al. (2009) Hal Daumé, John Langford, and Daniel Marcu. Search-based Structured Prediction.
+          - generic [ref=f9e3070]:
+            - emphasis [ref=f9e3071]: Mach. Learn.
+            - text: ", 75(3):297–325, 2009."
+        - listitem [ref=f9e3072]:
+          - text: Dziugaite et al. (2015) Gintare Karolina Dziugaite, Daniel M Roy, and Zoubin Ghahramani. Training Generative Neural Networks via Maximum Mean Discrepancy Optimization.
+          - generic [ref=f9e3073]:
+            - text: In
+            - emphasis [ref=f9e3074]: UAI
+            - text: ", 2015."
+        - listitem [ref=f9e3075]:
+          - text: "Engstrom et al. (2020) Logan Engstrom, Andrew Ilyas, Shibani Santurkar, Dimitris Tsipras, Firdaus Janoos, Larry Rudolph, and Aleksander Madry. Implementation Matters in Deep Policy Gradients: A Case Study on PPO and TRPO."
+          - generic [ref=f9e3076]:
+            - text: In
+            - emphasis [ref=f9e3077]: ICLR
+            - text: ", 2020."
+        - listitem [ref=f9e3078]:
+          - text: Finn et al. (2016) Chelsea Finn, Paul Christiano, Pieter Abbeel, and Sergey Levine. A Connection Between Generative Adversarial Networks, Inverse Reinforcement Learning, and Energy-based Models.
+          - generic [ref=f9e3079]:
+            - emphasis [ref=f9e3080]: arXiv:1611.03852
+            - text: ", 2016."
+        - listitem [ref=f9e3081]:
+          - text: Fu et al. (2018) Justin Fu, Katie Luo, and Sergey Levine. Learning Robust Rewards with Adversarial Inverse Reinforcement Learning.
+          - generic [ref=f9e3082]:
+            - text: In
+            - emphasis [ref=f9e3083]: ICLR
+            - text: ", 2018."
+        - listitem [ref=f9e3084]:
+          - text: "Fu et al. (2020) Justin Fu, Aviral Kumar, Ofir Nachum, George Tucker, and Sergey Levine. D4RL: Datasets for Deep Data-driven Reinforcement Learning."
+          - generic [ref=f9e3085]:
+            - emphasis [ref=f9e3086]: arXiv:2004.07219
+            - text: ", 2020."
+        - listitem [ref=f9e3087]:
+          - text: Fujimoto et al. (2018) Scott Fujimoto, Herke Hoof, and David Meger. Addressing Function Approximation Error in Actor-critic Methods.
+          - generic [ref=f9e3088]:
+            - text: In
+            - emphasis [ref=f9e3089]: ICML
+            - text: ", 2018."
+        - listitem [ref=f9e3090]:
+          - text: Ghasemipour et al. (2020) Seyed Kamyar Seyed Ghasemipour, Richard Zemel, and Shixiang Gu. A Divergence Minimization Perspective on Imitation Learning Methods.
+          - generic [ref=f9e3091]:
+            - text: In
+            - emphasis [ref=f9e3092]: CoRL
+            - text: ", 2020."
+        - listitem [ref=f9e3093]:
+          - text: Goodfellow et al. (2014) Ian J Goodfellow, Jean Pouget-Abadie, Mehdi Mirza, Bing Xu, David Warde-Farley, Sherjil Ozair, Aaron Courville, and Yoshua Bengio. Generative Adversarial Networks.
+          - generic [ref=f9e3094]:
+            - text: In
+            - emphasis [ref=f9e3095]: NeurIPS
+            - text: ", 2014."
+        - listitem [ref=f9e3096]:
+          - text: Gretton et al. (2012) Arthur Gretton, Karsten M Borgwardt, Malte J Rasch, Bernhard Schölkopf, and Alexander Smola. A Kernel Two-sample Test.
+          - generic [ref=f9e3097]:
+            - emphasis [ref=f9e3098]: JMLR
+            - text: ", 13(1):723–773, 2012."
+        - listitem [ref=f9e3099]:
+          - text: "Haarnoja et al. (2018a) Tuomas Haarnoja, Aurick Zhou, Pieter Abbeel, and Sergey Levine. Soft Actor-critic: Off-policy Maximum Entropy Deep Reinforcement Learning with a Stochastic Actor."
+          - generic [ref=f9e3100]:
+            - text: In
+            - emphasis [ref=f9e3101]: ICML
+            - text: ", 2018a."
+        - listitem [ref=f9e3102]:
+          - text: Haarnoja et al. (2018b) Tuomas Haarnoja, Aurick Zhou, Kristian Hartikainen, George Tucker, Sehoon Ha, Jie Tan, Vikash Kumar, Henry Zhu, Abhishek Gupta, Pieter Abbeel, et al. Soft Actor-critic Algorithms and Applications.
+          - generic [ref=f9e3103]:
+            - emphasis [ref=f9e3104]: arXiv:1812.05905
+            - text: ", 2018b."
+        - listitem [ref=f9e3105]:
+          - text: Henderson et al. (2018) Peter Henderson, Riashat Islam, Philip Bachman, Joelle Pineau, Doina Precup, and David Meger. Deep Reinforcement Learning that Matters.
+          - generic [ref=f9e3106]:
+            - text: In
+            - emphasis [ref=f9e3107]: AAAI
+            - text: ", 2018."
+        - listitem [ref=f9e3108]:
+          - text: Ho and Ermon (2016) Jonathan Ho and Stefano Ermon. Generative Adversarial Imitation Learning.
+          - generic [ref=f9e3109]:
+            - text: In
+            - emphasis [ref=f9e3110]: NeurIPS
+            - text: ", 2016."
+        - listitem [ref=f9e3111]:
+          - text: "Hussein et al. (2017) Ahmed Hussein, Mohamed Medhat Gaber, Eyad Elyan, and Chrisina Jayne. Imitation Learning: A Survey of Learning Methods."
+          - generic [ref=f9e3112]:
+            - emphasis [ref=f9e3113]: ACM CSUR
+            - text: ", 50(2):1–35, 2017."
+        - listitem [ref=f9e3114]:
+          - text: Hussenot et al. (2021) Leonard Hussenot, Marcin Andrychowicz, Damien Vincent, Robert Dadashi, Anton Raichuk, Lukasz Stafiniak, Sertan Girgin, Raphael Marinier, Nikola Momchev, Sabela Ramos, et al. Hyperparameter Selection for Imitation Learning.
+          - generic [ref=f9e3115]:
+            - text: In
+            - emphasis [ref=f9e3116]: ICML
+            - text: ", 2021."
+        - listitem [ref=f9e3117]:
+          - text: Jaynes (1957) Edwin T Jaynes. Information Theory and Statistical Mechanics.
+          - generic [ref=f9e3118]:
+            - emphasis [ref=f9e3119]: Phys. Rev.
+            - text: ", 106(4):620, 1957."
+        - listitem [ref=f9e3120]:
+          - text: Jena et al. (2020) Rohit Jena, Siddharth Agrawal, and Katia Sycara. Addressing Reward Bias in Adversarial Imitation Learning with Neutral Reward Functions.
+          - generic [ref=f9e3121]:
+            - text: In
+            - emphasis [ref=f9e3122]: Deep RL Workshop, NeurIPS
+            - text: ", 2020."
+        - listitem [ref=f9e3123]:
+          - text: Kim and Park (2018) Kee-Eung Kim and Hyun Soo Park. Imitation Learning via Kernel Mean Embedding.
+          - generic [ref=f9e3124]:
+            - text: In
+            - emphasis [ref=f9e3125]: AAAI
+            - text: ", 2018."
+        - listitem [ref=f9e3126]:
+          - text: "Kostrikov et al. (2019) Ilya Kostrikov, Kumar Krishna Agrawal, Debidatta Dwibedi, Sergey Levine, and Jonathan Tompson. Discriminator-actor-critic: Addressing Sample Inefficiency and Reward Bias in Adversarial Imitation Learning."
+          - generic [ref=f9e3127]:
+            - text: In
+            - emphasis [ref=f9e3128]: ICLR
+            - text: ", 2019."
+        - listitem [ref=f9e3129]:
+          - text: Lakshminarayanan et al. (2017) Balaji Lakshminarayanan, Alexander Pritzel, and Charles Blundell. Simple and Scalable Predictive Uncertainty Estimation using Deep Ensembles.
+          - generic [ref=f9e3130]:
+            - text: In
+            - emphasis [ref=f9e3131]: NeurIPS
+            - text: ", 2017."
+        - listitem [ref=f9e3132]:
+          - text: Li et al. (2015) Yujia Li, Kevin Swersky, and Rich Zemel. Generative Moment Matching Networks.
+          - generic [ref=f9e3133]:
+            - text: In
+            - emphasis [ref=f9e3134]: ICML
+            - text: ", 2015."
+        - listitem [ref=f9e3135]:
+          - text: Lin (1992) Long-Ji Lin. Self-improving Reactive Agents Based on Reinforcement Learning, Planning and Teaching.
+          - generic [ref=f9e3136]:
+            - emphasis [ref=f9e3137]: Mach. Learn.
+            - text: ", 8(3-4):293–321, 1992."
+        - listitem [ref=f9e3138]:
+          - text: Loshchilov and Hutter (2019) Ilya Loshchilov and Frank Hutter. Decoupled Weight Decay Regularization.
+          - generic [ref=f9e3139]:
+            - text: In
+            - emphasis [ref=f9e3140]: ICLR
+            - text: ", 2019."
+        - listitem [ref=f9e3141]:
+          - text: "Machado et al. (2018) Marlos C Machado, Marc G Bellemare, Erik Talvitie, Joel Veness, Matthew Hausknecht, and Michael Bowling. Revisiting the Arcade Learning Environment: Evaluation Protocols and Open Problems for General Agents."
+          - generic [ref=f9e3142]:
+            - emphasis [ref=f9e3143]: JAIR
+            - text: ", 61:523–562, 2018."
+        - listitem [ref=f9e3144]:
+          - text: Müller (1997) Alfred Müller. Integral Probability Metrics and Their Generating Classes of Functions.
+          - generic [ref=f9e3145]:
+            - emphasis [ref=f9e3146]: Adv. Appl. Probab.
+            - text: ", 29(2):429–443, 1997."
+        - listitem [ref=f9e3147]:
+          - text: Musgrave et al. (2020) Kevin Musgrave, Serge Belongie, and Ser-Nam Lim. A Metric Learning Reality Check.
+          - generic [ref=f9e3148]:
+            - text: In
+            - emphasis [ref=f9e3149]: ECCV
+            - text: ", 2020."
+        - listitem [ref=f9e3150]:
+          - text: "Ng et al. (1999) Andrew Y Ng, Daishi Harada, and Stuart Russell. Policy Invariance Under Reward Transformations: Theory and Application to Reward Shaping."
+          - generic [ref=f9e3151]:
+            - text: In
+            - emphasis [ref=f9e3152]: ICML
+            - text: ", 1999."
+        - listitem [ref=f9e3153]:
+          - text: Ng et al. (2000) Andrew Y Ng, Stuart J Russell, et al. Algorithms for Inverse Reinforcement Learning.
+          - generic [ref=f9e3154]:
+            - text: In
+            - emphasis [ref=f9e3155]: ICML
+            - text: ", 2000."
+        - listitem [ref=f9e3156]:
+          - text: Oliver et al. (2018) Avital Oliver, Augustus Odena, Colin A Raffel, Ekin Dogus Cubuk, and Ian Goodfellow. Realistic Evaluation of Deep Semi-supervised Learning Algorithms.
+          - generic [ref=f9e3157]:
+            - text: In
+            - emphasis [ref=f9e3158]: NeurIPS
+            - text: ", 2018."
+        - listitem [ref=f9e3159]:
+          - text: Orsini et al. (2021) Manu Orsini, Anton Raichuk, Léonard Hussenot, Damien Vincent, Robert Dadashi, Sertan Girgin, Matthieu Geist, Olivier Bachem, Olivier Pietquin, and Marcin Andrychowicz. What Matters for Adversarial Imitation Learning?
+          - generic [ref=f9e3160]:
+            - text: In
+            - emphasis [ref=f9e3161]: NeurIPS
+            - text: ", 2021."
+        - listitem [ref=f9e3162]:
+          - text: Pardo et al. (2018) Fabio Pardo, Arash Tavakoli, Vitaly Levdik, and Petar Kormushev. Time Limits in Reinforcement Learning.
+          - generic [ref=f9e3163]:
+            - text: In
+            - emphasis [ref=f9e3164]: ICML
+            - text: ", 2018."
+        - listitem [ref=f9e3165]:
+          - text: "Paszke et al. (2019) Adam Paszke, Sam Gross, Francisco Massa, Adam Lerer, James Bradbury, Gregory Chanan, Trevor Killeen, Zeming Lin, Natalia Gimelshein, Luca Antiga, et al. PyTorch: An Imperative Style, High-Performance Deep Learning Library."
+          - generic [ref=f9e3166]:
+            - text: In
+            - emphasis [ref=f9e3167]: NeurIPS
+            - text: ", 2019."
+        - listitem [ref=f9e3168]:
+          - text: Piot et al. (2014) Bilal Piot, Matthieu Geist, and Olivier Pietquin. Boosted and Reward-regularized Classification for Apprenticeship Learning.
+          - generic [ref=f9e3169]:
+            - text: In
+            - emphasis [ref=f9e3170]: AAMAS
+            - text: ", 2014."
+        - listitem [ref=f9e3171]:
+          - text: "Pomerleau (1988) Dean A Pomerleau. ALVINN: An Autonomous Land Vehicle in a Neural Network."
+          - generic [ref=f9e3172]:
+            - text: In
+            - emphasis [ref=f9e3173]: NeurIPS
+            - text: ", 1988."
+        - listitem [ref=f9e3174]:
+          - text: "Raffin et al. (2021) Antonin Raffin, Ashley Hill, Adam Gleave, Anssi Kanervisto, Maximilian Ernestus, and Noah Dormann. Stable-baselines3: Reliable Reinforcement Learning Implementations."
+          - generic [ref=f9e3175]:
+            - emphasis [ref=f9e3176]: JMLR
+            - text: ", 22(1):12348–12355, 2021."
+        - listitem [ref=f9e3177]:
+          - text: "Reddy et al. (2020) Siddharth Reddy, Anca D Dragan, and Sergey Levine. SQIL: Imitation Learning via Reinforcement Learning with Sparse Rewards."
+          - generic [ref=f9e3178]:
+            - text: In
+            - emphasis [ref=f9e3179]: ICLR
+            - text: ", 2020."
+        - listitem [ref=f9e3180]:
+          - text: Ross and Bagnell (2010) Stéphane Ross and Drew Bagnell. Efficient Reductions for Imitation Learning.
+          - generic [ref=f9e3181]:
+            - text: In
+            - emphasis [ref=f9e3182]: AISTATS
+            - text: ", 2010."
+        - listitem [ref=f9e3183]:
+          - text: Ross et al. (2011) Stéphane Ross, Geoffrey Gordon, and Drew Bagnell. A Reduction of Imitation Learning and Structured Prediction to No-regret Online Learning.
+          - generic [ref=f9e3184]:
+            - text: In
+            - emphasis [ref=f9e3185]: AISTATS
+            - text: ", 2011."
+        - listitem [ref=f9e3186]:
+          - text: "Srivastava et al. (2014) Nitish Srivastava, Geoffrey Hinton, Alex Krizhevsky, Ilya Sutskever, and Ruslan Salakhutdinov. Dropout: A Simple Way to Prevent Neural Networks from Overfitting."
+          - generic [ref=f9e3187]:
+            - emphasis [ref=f9e3188]: JMLR
+            - text: ", 15(1):1929–1958, 2014."
+        - listitem [ref=f9e3189]:
+          - text: Sutton and Barto (2018) Richard S Sutton and Andrew G Barto.
+          - generic [ref=f9e3190]:
+            - emphasis [ref=f9e3191]: "Reinforcement Learning: An Introduction"
+            - text: .
+          - text: MIT Press, 2018.
+        - listitem [ref=f9e3192]:
+          - text: "Swamy et al. (2021) Gokul Swamy, Sanjiban Choudhury, J Andrew Bagnell, and Steven Wu. Of Moments and Matching: A Game-theoretic Framework for Closing the Imitation Gap."
+          - generic [ref=f9e3193]:
+            - text: In
+            - emphasis [ref=f9e3194]: ICML
+            - text: ", 2021."
+        - listitem [ref=f9e3195]:
+          - text: Syed et al. (2008) Umar Syed, Michael Bowling, and Robert E Schapire. Apprenticeship Learning using Linear Programming.
+          - generic [ref=f9e3196]:
+            - text: In
+            - emphasis [ref=f9e3197]: ICML
+            - text: ", 2008."
+        - listitem [ref=f9e3198]:
+          - text: "Todorov et al. (2012) Emanuel Todorov, Tom Erez, and Yuval Tassa. MuJoCo: A Physics Engine for Model-based Control."
+          - generic [ref=f9e3199]:
+            - text: In
+            - emphasis [ref=f9e3200]: IROS
+            - text: ", 2012."
+        - listitem [ref=f9e3201]:
+          - text: Villani (2009) Cédric Villani.
+          - generic [ref=f9e3202]:
+            - emphasis [ref=f9e3203]: "Optimal Transport: Old and New"
+            - text: .
+          - text: Springer, 2009.
+        - listitem [ref=f9e3204]:
+          - text: "Wang et al. (2019) Ruohan Wang, Carlo Ciliberto, Pierluigi Vito Amadori, and Yiannis Demiris. Random Expert Distillation: Imitation Learning via Expert Policy Support Estimation."
+          - generic [ref=f9e3205]:
+            - text: In
+            - emphasis [ref=f9e3206]: ICML
+            - text: ", 2019."
+        - listitem [ref=f9e3207]:
+          - text: Williams and Peng (1991) Ronald J Williams and Jing Peng. Function Optimization using Connectionist Reinforcement Learning Algorithms.
+          - generic [ref=f9e3208]:
+            - emphasis [ref=f9e3209]: Conn. Sci.
+            - text: ", 3(3):241–268, 1991."
+        - listitem [ref=f9e3210]:
+          - text: Xu and Denil (2021) Danfei Xu and Misha Denil. Positive-unlabeled Reward Learning.
+          - generic [ref=f9e3211]:
+            - text: In
+            - emphasis [ref=f9e3212]: CoRL
+            - text: ", 2021."
+        - listitem [ref=f9e3213]:
+          - text: "Yan et al. (2017) Hongliang Yan, Yukang Ding, Peihua Li, Qilong Wang, Yong Xu, and Wangmeng Zuo. Mind the Class Weight Bias: Weighted Maximum Mean Discrepancy for Unsupervised Domain Adaptation."
+          - generic [ref=f9e3214]:
+            - text: In
+            - emphasis [ref=f9e3215]: CVPR
+            - text: ", 2017."
+        - listitem [ref=f9e3216]:
+          - text: Ziebart et al. (2008) Brian D Ziebart, Andrew L Maas, J Andrew Bagnell, and Anind K Dey. Maximum Entropy Inverse Reinforcement Learning.
+          - generic [ref=f9e3217]:
+            - text: In
+            - emphasis [ref=f9e3218]: AAAI
+            - text: ", 2008."
+  - generic [ref=f9e3219]:
+    - link "◄" [ref=f9e3220] [cursor=pointer]:
+      - /url: /html/2108.01866
+    - link [ref=f9e3221] [cursor=pointer]:
+      - /url: /
+      - img "ar5iv homepage" [ref=f9e3222]
+    - link "Feeling lucky?" [ref=f9e3223] [cursor=pointer]:
+      - /url: /feeling_lucky
+      - text: Feelinglucky?
+    - link "Conversion report (W)" [ref=f9e3224] [cursor=pointer]:
+      - /url: /log/2108.01867
+      - text: Conversionreport (W)
+    - link "Report an issue" [ref=f9e3225] [cursor=pointer]:
+      - /url: https://github.com/dginev/ar5iv/issues/new?template=improve-article--arxiv-id-.md&title=Improve+article+2108.01867
+      - text: Reportan issue
+    - link "View original on arXiv" [ref=f9e3226] [cursor=pointer]:
+      - /url: https://arxiv.org/abs/2108.01867
+      - text: View originalon arXiv
+    - link "►" [ref=f9e3227] [cursor=pointer]:
+      - /url: /html/2108.01868
+  - contentinfo [ref=f9e3228]:
+    - link "🌙" [ref=f9e3229] [cursor=pointer]:
+      - /url: javascript:toggleColorScheme()
+    - link "Copyright" [ref=f9e3231] [cursor=pointer]:
+      - /url: https://arxiv.org/help/license
+    - link "Privacy Policy" [ref=f9e3232] [cursor=pointer]:
+      - /url: https://arxiv.org/help/policies/privacy_policy
+    - generic [ref=f9e3233]:
+      - text: Generated by
+      - link "LaTeXMLMascot Sammy" [ref=f9e3234] [cursor=pointer]:
+        - /url: http://dlmf.nist.gov/LaTeXML/
+        - generic [ref=f9e3235]: LaTe
+        - text: XML
+        - img "Mascot Sammy" [ref=f9e3236]
+      - text: oxide

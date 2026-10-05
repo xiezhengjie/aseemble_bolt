@@ -1,0 +1,64 @@
+training:
+  seed: 42
+  split_seed: 42
+  split: 0.8
+  epochs: 10
+  patience: 50
+  eval_episodes: 30
+  eval_seed: 42
+  batch_size: 512
+  num_workers: 0
+
+policy:
+  _target_: training.policy.diffusion_policy.DiffusionPolicy
+
+  horizon: 16
+  obs_dim: 10
+  action_dim: 6
+  n_action_steps: 8 
+  n_obs_steps: 2
+  num_inference_steps: 100
+  warmstart_timestep: 50
+  eta: 0.0
+  lr: 1e-3
+  weight_decay: 0.0
+
+  model:
+    # _target_: training.model.base.conditional_unet1d.ConditionalUnet1D
+    _target_: training.model.base.conditional_unet1d_sample.ConditionalUnet1D
+    input_dim: ${policy.action_dim}
+    global_cond_dim: ${eval:${policy.n_obs_steps} * ${policy.obs_dim}} # n_obs_steps * obs_dim
+    diffusion_step_embed_dim: 256
+    down_dims: [128, 256, 512]
+    kernel_size: 5
+    n_groups: 8
+
+  noise_scheduler:
+    _target_: diffusers.schedulers.scheduling_ddpm.DDPMScheduler
+    num_train_timesteps: 100
+    beta_start: 0.0001
+    beta_end: 0.02
+    beta_schedule: squaredcos_cap_v2
+    variance_type: fixed_small # Yilun's paper uses fixed_small_log instead, but easy to cause Nan
+    clip_sample: True # required when predict_epsilon=False
+    prediction_type: epsilon # or sample
+
+name: base_policy_diffusion
+
+logging:
+  project: diffusion_policy_debug
+  resume: True
+  mode: online
+  name: ${now:%Y.%m.%d-%H.%M.%S}_${name}
+  tags: ["base_policy", "diffusion_policy"]
+  id: null
+  group: null
+
+hydra:
+  job:
+    override_dirname: ${name}
+  run:
+    dir: logs/outputs/${name}/${now:%Y.%m.%d}/${now:%H.%M.%S}
+  sweep:
+    dir: logs/outputs/${name}/${now:%Y.%m.%d}/${now:%H.%M.%S}
+    subdir: ${hydra.job.num}

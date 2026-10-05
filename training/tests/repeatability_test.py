@@ -7,8 +7,8 @@ import torch
 sys.path.insert(0, "/tmp/work/training")
 from pathlib import Path
 from envs.assemble_mujoco_env import AssembleMuJoCoEnv
-from utils import rl_utils
-from algorithm.residual_sac import ResidualSAC
+from training.common import rl_utils
+from training.model.gail.residual_sac import ResidualSACAgent
 
 root_dir = Path("/tmp/work")
 xml_path = str(root_dir / "mjcf/ur5e_assemble_sence.xml")
@@ -29,7 +29,7 @@ env = make_env()
 print("[backend] UR5E_IK_BACKEND =", os.environ.get("UR5E_IK_BACKEND", "(default pin)"))
 
 action_space = env.action_space
-agent = ResidualSAC(
+agent = ResidualSACAgent(
     base_model_dir=bc_dir, raw_obs_dim=10, action_dim=int(action_space.shape[0]),
     seq_len=FRAME_STACK, gru_hidden_dim=64,
     action_low=action_space.low, action_high=action_space.high,

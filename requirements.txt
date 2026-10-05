@@ -1,5 +1,5 @@
 # ============================================
-# 注意1：PyTorch 请根据你的 CUDA 版本单独安装！
+# 注意1：PyTorch 请根据你的 CUDA 版本单独安装！本文件不包含 torch。
 # 远程环境 CUDA 驱动 590.44，建议安装 CUDA 12.4 版本：
 #
 #   pip install torch==2.5.1 torchvision==0.20.1 --index-url https://download.pytorch.org/whl/cu124
@@ -13,6 +13,22 @@
 #
 # 注意3：如果不需要 TRAC-IK 而需要 ROS 原生版本（trac_ik_python），
 # 请通过 apt 安装：sudo apt install ros-$ROS_DISTRO-trac-ik
+#
+# 注意4：版本之间互相约束，改一处往往要连带改三处（2026-09-28 核对）：
+#
+#   torch==2.5.1（由注意1 单独安装）
+#     └─ stable_baselines3==2.8.0   要求 torch>=2.3
+#          └─ 要求 gymnasium<1.3.0  → 所以这里钉 gymnasium==1.2.3
+#
+#   不要升到 stable_baselines3==2.9.0：它要求 torch>=2.8，会引入 CUDA 13 的 nvidia 依赖，
+#   而 Pascal 架构（如本机 MX330, sm_61）在新驱动 580/CUDA 13 下已无法进行 CUDA 计算。
+#
+#   其他几处钉死的原因：
+#     sympy==1.13.1            torch 2.5.1 硬性要求 sympy==1.13.1（写 1.13.3 会与 torch 直接冲突）
+#     typing_extensions==4.16.0 新版 jupyter_client 需要 >=4.13（4.12 会报 TypedDict extra_items TypeError）
+#     opencv-python==4.10.0.84  4.11+ 要求 numpy>=2，与本文件 numpy==1.26.4 冲突
+#     glfw==2.10.2            PyPI 上不存在 glfw 2.8.2 这个版本
+#     pin==2.7.0              引脚为 pinocchio；4.x 与 2.7 的 cmeel 依赖栈不同，勿随意混装
 # ============================================
 
 absl-py==2.1.0
@@ -26,9 +42,9 @@ Farama-Notifications==0.0.6
 filelock==3.16.1
 fonttools==4.55.0
 fsspec==2024.9.0
-glfw==2.8.2
+glfw==2.10.2
 grpcio==1.70.0
-gymnasium==1.3.0
+gymnasium==1.2.3
 importlib_resources==6.4.5
 Jinja2==3.1.6
 kiwisolver==1.4.8
@@ -39,21 +55,27 @@ mpmath==1.3.0
 mujoco==3.8.1
 networkx==3.3
 numpy==1.26.4
+opencv-python==4.10.0.84
 packaging==24.2
 pillow==11.0.0
 pin==2.7.0
 protobuf==5.28.3
-pytracik
+pygame==2.6.1
+pynput==1.8.2
+pytracik==0.0.3
 PyOpenGL==3.1.7
 pyparsing==3.2.0
 python-dateutil==2.9.0.post0
 scipy==1.15.2
 six==1.16.0
-stable_baselines3==2.9.0
-sympy==1.13.3
+sympy==1.13.1
 tensorboard==2.18.0
 tensorboard-data-server==0.7.2
 tqdm==4.66.5
-typing_extensions==4.12.2
+typing_extensions==4.16.0
 Werkzeug==3.1.3
 zipp==3.20.2
+wandb
+einops
+hydra-core
+diffusers

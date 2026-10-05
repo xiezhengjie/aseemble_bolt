@@ -3,8 +3,8 @@ import sys, json, numpy as np, torch
 sys.path.insert(0, "/tmp/work/training")
 from pathlib import Path
 from envs.assemble_mujoco_env import AssembleMuJoCoEnv
-from utils import rl_utils
-from algorithm.residual_sac import ResidualSAC
+from training.common import rl_utils
+from training.model.gail.residual_sac import ResidualSACAgent
 
 ckpt = sys.argv[1]; tag = sys.argv[2]
 root_dir = Path("/tmp/work")
@@ -13,7 +13,7 @@ env = AssembleMuJoCoEnv(xml_path=str(root_dir/"mjcf/ur5e_assemble_sence.xml"),
                         render_mode=None, max_episodic_steps=400)
 env = rl_utils.wrap_frame_stack(env, 8)
 env = rl_utils.EpisodeStatsWrapper(env)
-agent = ResidualSAC(base_model_dir=root_dir/"models"/"bc_model_ur5e",
+agent = ResidualSACAgent(base_model_dir=root_dir/"models"/"bc_model_ur5e",
                     raw_obs_dim=10, action_dim=6, seq_len=8, gru_hidden_dim=64,
                     action_low=env.action_space.low, action_high=env.action_space.high,
                     hidden_dim=(512,512), residual_scale=0.05, device=torch.device("cpu"))

@@ -2,10 +2,10 @@
 import sys, numpy as np, torch
 sys.path.insert(0, "/tmp/work/training")
 from pathlib import Path
-import algorithm.ur5e_ik as uik
+import training.envs.ur5e_ik as uik
 from envs.assemble_mujoco_env import AssembleMuJoCoEnv
-from utils import rl_utils
-from algorithm.residual_sac import ResidualSAC
+from training.common import rl_utils
+from training.model.gail.residual_sac import ResidualSACAgent
 
 # ---- 插桩：包装 ik_pinocchio 记录失败 ----
 stats = {"calls": 0, "fail": 0, "err_fail": []}
@@ -15,7 +15,7 @@ def wrapped(self, tgt_pos, tgt_quat, seed):
     stats["calls"] += 1
     # 用 FK 复查到位误差
     pos, quat = self.fk_pinocchio(q)
-    from utils.math_utils import quat_to_rotmat
+    from training.common.math_utils import quat_to_rotmat
     R_t = quat_to_rotmat(tgt_quat); R_a = quat_to_rotmat(quat)
     pos_err = float(np.linalg.norm(pos - tgt_pos))
     rot_err = float(np.arccos(np.clip((np.trace(R_t.T @ R_a) - 1) / 2, -1, 1)))
@@ -31,7 +31,7 @@ env = AssembleMuJoCoEnv(xml_path=str(root_dir/"mjcf/ur5e_assemble_sence.xml"),
                         render_mode=None, max_episodic_steps=400)
 env = rl_utils.wrap_frame_stack(env, 8)
 env = rl_utils.EpisodeStatsWrapper(env)
-agent = ResidualSAC(base_model_dir=root_dir/"models"/"bc_model_ur5e",
+agent = ResidualSACAgent(base_model_dir=root_dir/"models"/"bc_model_ur5e",
                     raw_obs_dim=10, action_dim=6, seq_len=8, gru_hidden_dim=64,
                     action_low=env.action_space.low, action_high=env.action_space.high,
                     hidden_dim=(512,512), residual_scale=0.05, device=torch.device("cpu"))

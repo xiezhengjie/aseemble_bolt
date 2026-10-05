@@ -40,8 +40,8 @@ import copy
 from gymnasium import Env
 from gymnasium.spaces import Box
 
-from algorithm.controllers import UR5eController
-from utils.math_utils import (
+from training.envs.controllers import UR5eController
+from training.common.math_utils import (
     rotmat_to_quat, quat_multiply, euler_to_quat,
     rotmat_to_euler, normalize_euler,
 )
@@ -53,8 +53,8 @@ class AssembleMuJoCoEnv(Env):
     使用 min-jerk 插值生成轨迹，CTC 作为内环控制器，
     可选导纳控制实现外力顺应。力校准、导纳、CTC 均封装在 UR5eController 中。
     """
-    DEFAULT_XML_PATH = str(PROJECT_ROOT / "mjcf" / "ur5e_assemble_sence.xml")
-    DEFAULT_URDF_PATH = str(PROJECT_ROOT / "urdf" / "ur5e_assemble.urdf")
+    DEFAULT_XML_PATH = str(PROJECT_ROOT / "assets/mjcf" / "ur5e_assemble_sence.xml")
+    DEFAULT_URDF_PATH = str(PROJECT_ROOT / "assets/urdf" / "ur5e_assemble.urdf")
     # 预设初始位姿: (关节角[度], 末端位置[m], 末端欧拉角[度])
     DEFAULT_INITIAL_POSE = (
         [193.37, -106.87, -103.69, -59.44, 90.0, 13.37],
@@ -132,8 +132,8 @@ class AssembleMuJoCoEnv(Env):
         admittance_zeta_r=1.2,
         admittance_b_t=None,
         admittance_b_r=None,
-        admittance_force_deadzone=0.2,
-        admittance_torque_deadzone=0.01,
+        admittance_force_deadzone=0.1,
+        admittance_torque_deadzone=0.005,
         f_0=np.zeros(6),
 
         # --- 力校准参数 ---
@@ -510,6 +510,18 @@ class AssembleMuJoCoEnv(Env):
     # ============================================================
     def _action_to_pose(self, action):
         """策略动作(6维): 当前实际位姿 + 位置/欧拉角增量。"""
+        # current_pos = self.data.site_xpos[self.eef_site_id].copy()
+        # current_quat = rotmat_to_quat(self.data.site_xmat[self.eef_site_id].reshape(3, 3))
+
+        # # 动作是相对当前实际位姿的增量。遥操零动作表示保持当前位置，
+        # # 不能继续使用上一帧目标，否则实际位姿被导纳/鼠标改变后会被旧目标拉回。
+        # if self.is_teleoperation and np.allclose(
+        #     action, np.zeros(6), rtol=0, atol=1e-5
+        # ):
+        #     self.last_pos = current_pos.copy()
+        #     self.last_quat = current_quat.copy()
+        #     return current_pos, current_quat
+
         # 遥操零动作保持上一目标，避免 viewer 鼠标拖动导致跟随；策略控制
         # 包括零动作都锚定当前实际位姿，不再读取上一帧目标。
         if (self.is_teleoperation and self.last_pos is not None

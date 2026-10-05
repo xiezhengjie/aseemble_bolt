@@ -1,12 +1,12 @@
-import src.mujoco_viewer as mujoco_viewer
+import cv2
 import time
 import mujoco
 import math
 import solvepnp 
 import numpy as np
-import key_listener 
+import src.mujoco_viewer as mujoco_viewer
+import training.scripts.test_key_listener as test_key_listener 
 from pynput import keyboard
-import cv2
 from typing import Tuple, List
 
 # 按键状态字典
@@ -33,7 +33,7 @@ class PandaEnv(mujoco_viewer.CustomViewer):
     def __init__(self, path):
         super().__init__(path, 3, azimuth=-45, elevation=-30)
         self.path = path
-        self.key_listener = key_listener.KeyListener(key_states)
+        self.key_listener = test_key_listener.KeyListener(key_states)
         self.key_listener.start()
         
         # 标定相关初始化

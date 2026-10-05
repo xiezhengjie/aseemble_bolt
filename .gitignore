@@ -23,6 +23,7 @@ venv/
 .vscode/
 .idea/
 .DS_Store
+.env
 
 # ─────────── 3D 资产（约 87M）───────────
 # MuJoCo 运行必需，建议保留在仓库中；

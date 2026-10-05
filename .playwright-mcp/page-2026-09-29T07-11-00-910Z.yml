@@ -1,0 +1,288 @@
+- generic [ref=e2]:
+  - link "Skip to main content" [ref=e3] [cursor=pointer]:
+    - /url: "#content"
+  - banner [ref=e4]:
+    - link [aria-hidden] [ref=e5] [cursor=pointer]:
+      - /url: https://arxiv.org/IgnoreMe
+    - link "archive home" [ref=e6] [cursor=pointer]:
+      - /url: https://arxiv.org/
+      - img "archive" [ref=e7]
+    - navigation "Main navigation" [ref=e8]:
+      - link "Search" [ref=e9] [cursor=pointer]:
+        - /url: https://arxiv.org/search
+      - link "Submit" [ref=e13] [cursor=pointer]:
+        - /url: https://arxiv.org/user/create
+      - link "Donate" [ref=e14] [cursor=pointer]:
+        - /url: https://info.arxiv.org/about/donate.html
+      - link "Log in" [ref=e16] [cursor=pointer]:
+        - /url: https://arxiv.org/login
+  - main [ref=e17]:
+    - generic [ref=e19]:
+      - generic [ref=e20]:
+        - heading "Computer Science > Machine Learning" [level=1] [ref=e22]
+        - generic [ref=e24]:
+          - generic [ref=e25]:
+            - text: "[Submitted on 28 Sep 2018 ("
+            - link "v1" [ref=e26] [cursor=pointer]:
+              - /url: https://arxiv.org/abs/1809.11096v1
+            - text: ), last revised 25 Feb 2019 (this version, v2)]
+          - heading "Large Scale GAN Training for High Fidelity Natural Image Synthesis" [level=1] [ref=e27]
+          - generic [ref=e28]:
+            - link "Andrew Brock" [ref=e29] [cursor=pointer]:
+              - /url: https://arxiv.org/search/cs?searchtype=author&query=Brock,+A
+            - text: ","
+            - link "Jeff Donahue" [ref=e30] [cursor=pointer]:
+              - /url: https://arxiv.org/search/cs?searchtype=author&query=Donahue,+J
+            - text: ","
+            - link "Karen Simonyan" [ref=e31] [cursor=pointer]:
+              - /url: https://arxiv.org/search/cs?searchtype=author&query=Simonyan,+K
+          - blockquote [ref=e32]: Despite recent progress in generative image modeling, successfully generating high-resolution, diverse samples from complex datasets such as ImageNet remains an elusive goal. To this end, we train Generative Adversarial Networks at the largest scale yet attempted, and study the instabilities specific to such scale. We find that applying orthogonal regularization to the generator renders it amenable to a simple "truncation trick," allowing fine control over the trade-off between sample fidelity and variety by reducing the variance of the Generator's input. Our modifications lead to models which set the new state of the art in class-conditional image synthesis. When trained on ImageNet at 128x128 resolution, our models (BigGANs) achieve an Inception Score (IS) of 166.5 and Frechet Inception Distance (FID) of 7.4, improving over the previous best IS of 52.52 and FID of 18.6.
+          - table "Additional metadata" [ref=e34]:
+            - rowgroup [ref=e35]:
+              - row [ref=e36]:
+                - cell "Subjects:" [ref=e37]
+                - cell "Machine Learning (cs.LG); Machine Learning (stat.ML)" [ref=e38]
+              - row [ref=e39]:
+                - cell "Cite as:" [ref=e40]
+                - cell [ref=e41]:
+                  - generic [ref=e42]:
+                    - link "arXiv:1809.11096" [ref=e43] [cursor=pointer]:
+                      - /url: https://arxiv.org/abs/1809.11096
+                    - text: "[cs.LG]"
+              - row [ref=e44]:
+                - cell [ref=e45]
+                - cell [ref=e46]:
+                  - text: (or
+                  - generic [ref=e47]:
+                    - link "arXiv:1809.11096v2" [ref=e48] [cursor=pointer]:
+                      - /url: https://arxiv.org/abs/1809.11096v2
+                    - text: "[cs.LG]"
+                  - text: for this version)
+              - row [ref=e49]:
+                - cell [ref=e50]
+                - cell [ref=e51]:
+                  - link "https://doi.org/10.48550/arXiv.1809.11096" [ref=e52] [cursor=pointer]:
+                    - /url: https://doi.org/10.48550/arXiv.1809.11096
+                  - button "Focus to learn more" [ref=e54]
+        - generic [ref=e57]:
+          - heading "Submission history" [level=2] [ref=e58]
+          - text: "From: Andrew Brock ["
+          - link "view email" [ref=e59] [cursor=pointer]:
+            - /url: /show-email/65b2cc33/1809.11096
+          - text: "]"
+          - strong [ref=e60]:
+            - link "[v1]" [ref=e61] [cursor=pointer]:
+              - /url: /abs/1809.11096v1
+          - text: Fri, 28 Sep 2018 15:38:49 UTC (9,132 KB)
+          - strong [ref=e62]: "[v2]"
+          - text: Mon, 25 Feb 2019 21:32:06 UTC (18,559 KB)
+      - generic [ref=e63]:
+        - generic [ref=e64]:
+          - heading "Access Paper:" [level=2] [ref=e65]
+          - list [ref=e66]:
+            - listitem [ref=e67]:
+              - link "View PDF" [ref=e68] [cursor=pointer]:
+                - /url: /pdf/1809.11096
+            - listitem [ref=e69]:
+              - link "HTML (experimental)" [ref=e70] [cursor=pointer]:
+                - /url: https://arxiv.org/html/1809.11096v2
+            - listitem [ref=e71]:
+              - link "TeX Source" [ref=e72] [cursor=pointer]:
+                - /url: /src/1809.11096
+          - link "view license" [ref=e74] [cursor=pointer]:
+            - /url: http://arxiv.org/licenses/nonexclusive-distrib/1.0/
+        - generic [ref=e75]:
+          - heading "Current browse context:" [level=3] [ref=e76]
+          - generic [ref=e77]: cs.LG
+          - generic [ref=e78]:
+            - link "< prev" [ref=e80] [cursor=pointer]:
+              - /url: /prevnext?id=1809.11096&function=prev&context=cs.LG
+            - text: "|"
+            - link "next >" [ref=e82] [cursor=pointer]:
+              - /url: /prevnext?id=1809.11096&function=next&context=cs.LG
+          - generic [ref=e83]:
+            - link "new" [ref=e84] [cursor=pointer]:
+              - /url: /list/cs.LG/new
+            - text: "|"
+            - link "recent" [ref=e85] [cursor=pointer]:
+              - /url: /list/cs.LG/recent
+            - text: "|"
+            - link "2018-09" [ref=e86] [cursor=pointer]:
+              - /url: /list/cs.LG/2018-09
+          - generic [ref=e87]:
+            - text: "Change to browse by:"
+            - generic [ref=e88]:
+              - link "cs" [ref=e89] [cursor=pointer]:
+                - /url: /abs/1809.11096?context=cs
+              - link "stat" [ref=e90] [cursor=pointer]:
+                - /url: /abs/1809.11096?context=stat
+              - link "stat.ML" [ref=e91] [cursor=pointer]:
+                - /url: /abs/1809.11096?context=stat.ML
+        - generic [ref=e92]:
+          - heading "References & Citations" [level=3] [ref=e93]
+          - list [ref=e94]:
+            - listitem [ref=e95]:
+              - link "NASA ADS" [ref=e96] [cursor=pointer]:
+                - /url: https://ui.adsabs.harvard.edu/abs/arXiv:1809.11096
+            - listitem [ref=e97]:
+              - link "Google Scholar" [ref=e98] [cursor=pointer]:
+                - /url: https://scholar.google.com/scholar_lookup?arxiv_id=1809.11096
+            - listitem [ref=e99]:
+              - link "Semantic Scholar" [ref=e100] [cursor=pointer]:
+                - /url: https://api.semanticscholar.org/arXiv:1809.11096
+        - generic [ref=e102]:
+          - heading [level=3] [ref=e103]:
+            - link "6 blog links" [ref=e104] [cursor=pointer]:
+              - /url: /tb/1809.11096
+          - text: (
+          - link "what is this?" [ref=e105] [cursor=pointer]:
+            - /url: https://info.arxiv.org/help/trackback.html
+          - text: )
+        - generic [ref=e106]:
+          - heading [level=3] [ref=e107]:
+            - link "DBLP" [ref=e108] [cursor=pointer]:
+              - /url: https://dblp.uni-trier.de
+            - text: "- CS Bibliography"
+          - generic [ref=e109]:
+            - link "listing" [ref=e110] [cursor=pointer]:
+              - /url: https://dblp.uni-trier.de/db/journals/corr/corr1809.html#abs-1809-11096
+            - text: "|"
+            - link "bibtex" [ref=e111] [cursor=pointer]:
+              - /url: https://dblp.uni-trier.de/rec/bibtex/journals/corr/abs-1809-11096
+          - generic [ref=e112]:
+            - link "Andrew Brock" [ref=e113] [cursor=pointer]:
+              - /url: https://dblp.uni-trier.de/search/author?author=Andrew%20Brock
+            - link "Jeff Donahue" [ref=e114] [cursor=pointer]:
+              - /url: https://dblp.uni-trier.de/search/author?author=Jeff%20Donahue
+            - link "Karen Simonyan" [ref=e115] [cursor=pointer]:
+              - /url: https://dblp.uni-trier.de/search/author?author=Karen%20Simonyan
+        - button "export BibTeX citation" [ref=e117]
+        - generic [ref=e118]:
+          - heading "Bookmark" [level=3] [ref=e120]
+          - link [ref=e121] [cursor=pointer]:
+            - /url: http://www.bibsonomy.org/BibtexHandler?requTask=upload&url=https://arxiv.org/abs/1809.11096&description=Large Scale GAN Training for High Fidelity Natural Image Synthesis
+            - img "BibSonomy" [ref=e122]
+          - link [ref=e123] [cursor=pointer]:
+            - /url: https://reddit.com/submit?url=https://arxiv.org/abs/1809.11096&title=Large Scale GAN Training for High Fidelity Natural Image Synthesis
+            - img "Reddit" [ref=e124]
+      - tablist "arXivLabs tools" [ref=e126]:
+        - radio "Bibliographic Tools" [checked] [ref=e127]
+        - tab "Bibliographic Tools" [selected] [ref=e128] [cursor=pointer]
+        - tabpanel "Bibliographic Tools" [ref=e129]:
+          - heading "Bibliographic and Citation Tools" [level=1] [ref=e130]
+          - generic [ref=e131]:
+            - generic [ref=e132]:
+              - generic [ref=e134]:
+                - checkbox "Bibliographic Explorer Toggle"
+                - generic [ref=e135] [cursor=pointer]
+                - generic [ref=e136]: Bibliographic Explorer Toggle
+              - generic [ref=e137]:
+                - text: Bibliographic Explorer
+                - emphasis [ref=e138]:
+                  - text: (
+                  - link "What is the Explorer?" [ref=e139] [cursor=pointer]:
+                    - /url: https://info.arxiv.org/labs/showcase.html#arxiv-bibliographic-explorer
+                  - text: )
+            - generic [ref=e140]:
+              - generic [ref=e142]:
+                - checkbox "Connected Papers"
+                - generic [ref=e143] [cursor=pointer]
+                - generic [ref=e144]: Connected Papers Toggle
+              - generic [ref=e145]:
+                - text: Connected Papers
+                - emphasis [ref=e146]:
+                  - text: (
+                  - link "What is Connected Papers?" [ref=e147] [cursor=pointer]:
+                    - /url: https://www.connectedpapers.com/about
+                  - text: )
+            - generic [ref=e148]:
+              - generic [ref=e150]:
+                - checkbox "Litmaps"
+                - generic [ref=e151] [cursor=pointer]
+                - generic [ref=e152]: Litmaps Toggle
+              - generic [ref=e153]:
+                - text: Litmaps
+                - emphasis [ref=e154]:
+                  - text: (
+                  - link "What is Litmaps?" [ref=e155] [cursor=pointer]:
+                    - /url: https://www.litmaps.co/
+                  - text: )
+            - generic [ref=e156]:
+              - generic [ref=e158]:
+                - checkbox "scite Smart Citations"
+                - generic [ref=e159] [cursor=pointer]
+                - generic [ref=e160]: scite.ai Toggle
+              - generic [ref=e161]:
+                - text: scite Smart Citations
+                - emphasis [ref=e162]:
+                  - text: (
+                  - link "What are Smart Citations?" [ref=e163] [cursor=pointer]:
+                    - /url: https://www.scite.ai/
+                  - text: )
+        - radio "Code, Data, Media" [ref=e167]
+        - tab "Code, Data, Media" [ref=e168] [cursor=pointer]
+        - radio "Demos" [ref=e169]
+        - tab "Demos" [ref=e170] [cursor=pointer]
+        - radio "Related Papers" [ref=e171]
+        - tab "Related Papers" [ref=e172] [cursor=pointer]
+        - radio "About arXivLabs" [ref=e173]
+        - tab "About arXivLabs" [ref=e174] [cursor=pointer]
+      - generic [ref=e175]:
+        - link "Which authors of this paper are endorsers?" [ref=e176] [cursor=pointer]:
+          - /url: /auth/show-endorsers/1809.11096
+        - text: "|"
+        - link "Disable MathJax" [ref=e177] [cursor=pointer]:
+          - /url: javascript:setMathjaxCookie()
+        - text: (
+        - link "What is MathJax?" [ref=e178] [cursor=pointer]:
+          - /url: https://info.arxiv.org/help/mathjax.html
+        - text: )
+  - contentinfo [ref=e179]:
+    - generic [ref=e180]:
+      - generic [ref=e181]:
+        - generic [ref=e182]:
+          - text: We gratefully acknowledge support from our
+          - strong [ref=e183]: major funders
+          - text: ","
+          - link [ref=e184] [cursor=pointer]:
+            - /url: https://info.arxiv.org/about/ourmembers.html
+            - strong [ref=e185]: member institutions
+          - text: ", and all contributors."
+        - navigation "Site navigation" [ref=e186]:
+          - link "About" [ref=e187] [cursor=pointer]:
+            - /url: https://info.arxiv.org/about
+          - generic [aria-hidden] [ref=e188]: ·
+          - link "Help" [ref=e189] [cursor=pointer]:
+            - /url: https://info.arxiv.org/help
+          - generic [aria-hidden] [ref=e190]: ·
+          - link "Contact" [ref=e191] [cursor=pointer]:
+            - /url: https://info.arxiv.org/help/contact.html
+          - generic [aria-hidden] [ref=e192]: ·
+          - link "Subscribe" [ref=e193] [cursor=pointer]:
+            - /url: https://info.arxiv.org/help/subscribe
+          - generic [aria-hidden] [ref=e194]: ·
+          - link "Copyright" [ref=e195] [cursor=pointer]:
+            - /url: https://info.arxiv.org/help/license/index.html
+          - generic [aria-hidden] [ref=e196]: ·
+          - link "Privacy" [ref=e197] [cursor=pointer]:
+            - /url: https://info.arxiv.org/help/policies/privacy_policy.html
+          - generic [aria-hidden] [ref=e198]: ·
+          - link "Accessibility" [ref=e199] [cursor=pointer]:
+            - /url: https://info.arxiv.org/help/web_accessibility.html
+          - generic [aria-hidden] [ref=e200]: ·
+          - link "Operational Status (opens in new tab)" [ref=e201] [cursor=pointer]:
+            - /url: https://status.arxiv.org
+            - text: Operational Status
+            - generic [ref=e202]: (opens in new tab)
+      - generic "Major funders" [ref=e203]:
+        - generic [ref=e204]: Major funding support from
+        - generic [ref=e205]:
+          - link [ref=e206] [cursor=pointer]:
+            - /url: https://www.simonsfoundation.org/
+            - img "Simons Foundation" [ref=e207]
+          - link [ref=e208] [cursor=pointer]:
+            - /url: https://www.sfi.org.bm/
+            - img "Simons Foundation International" [ref=e209]
+          - link [ref=e210] [cursor=pointer]:
+            - /url: https://www.schmidtsciences.org/
+            - img "Schmidt Sciences" [ref=e211]

@@ -10,8 +10,8 @@ import numpy as np
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from envs.assemble_mujoco_env import AssembleMuJoCoEnv
-from utils.math_utils import (
+from training.envs.assemble_mujoco_env import AssembleMuJoCoEnv
+from training.common.math_utils import (
     quat_conj,
     quat_multiply,
     quat_to_rotvec,
@@ -20,8 +20,8 @@ from utils.math_utils import (
 
 
 ROOT = Path(__file__).resolve().parents[2]
-XML = str(ROOT / "mjcf" / "ur5e_assemble_sence.xml")
-URDF = str(ROOT / "urdf" / "ur5e_assemble.urdf")
+XML = str(ROOT / "assets" / "mjcf" / "ur5e_assemble_sence.xml")
+URDF = str(ROOT / "assets" / "urdf" / "ur5e_assemble.urdf")
 
 
 def make_env(force_control=False):

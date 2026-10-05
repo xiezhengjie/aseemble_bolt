@@ -17,7 +17,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import numpy as np
 
 from envs.assemble_mujoco_env import AssembleMuJoCoEnv
-from utils.math_utils import rotmat_to_quat, quat_multiply, quat_error_angle, quat_conj
+from training.common.math_utils import rotmat_to_quat, quat_multiply, quat_error_angle, quat_conj
 
 ROOT = Path(__file__).resolve().parents[2]
 XML = str(ROOT / "mjcf" / "ur5e_assemble_sence.xml")
@@ -37,7 +37,7 @@ def variant_pure_integrate(env, action):
         return env.last_pos.copy(), env.last_quat.copy()
     dest_pos = env.last_pos + action[:3] * env.pos_action_scale
     w = action[3:] * env.ori_action_scale
-    from utils.math_utils import rotvec_to_quat
+    from training.common.math_utils import rotvec_to_quat
     dest_quat = quat_multiply(rotvec_to_quat(w), env.last_quat)
     env.last_pos, env.last_quat = dest_pos.copy(), dest_quat.copy()
     return dest_pos, dest_quat
@@ -91,7 +91,7 @@ def run_variant(name, patch_fn=None, seed=1234):
     def rel_z(q_end, q_start):
         # 绕世界 z 的实际转角：相对四元数旋转矢量的 z 分量
         # （初始姿态为 [-180,0,0]，直接取绝对四元数 rotvec 的 z 分量恒为 ~0）
-        from utils.math_utils import quat_to_rotvec
+        from training.common.math_utils import quat_to_rotvec
         return quat_to_rotvec(quat_multiply(q_end, quat_conj(q_start)))[2]
 
     def summarize(log):

@@ -1,307 +1,356 @@
+"""固定 20Hz 连续手柄采集入口。
+
+录制始终采用连续模式：即使摇杆回中也推进环境并记录零动作帧。
+每个 episode 的中间缓冲使用 transition 字典，最终文件保持训练兼容的
+``states/actions/dones`` 三个数组。
+
+B 键可切换到自由控制模式。该模式不写入示教数据，只持续运行环境力控循环，
+可在 MuJoCo viewer 中用鼠标拖动机械臂观察导纳和力控响应；再次按 B 键回到
+手柄控制模式后才继续连续采集。
+"""
+
+from __future__ import annotations
+
+import gc
+import logging
 import os
 import sys
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-import gc
-import pygame
-import logging
-import numpy as np
 import time
-from utils import rl_utils
-from utils.math_utils import rotmat_to_euler, quat_to_euler
-from algorithm.filter import LowPassFilter
-from envs.assemble_mujoco_env import AssembleMuJoCoEnv
+from collections import deque
+
+import numpy as np
+import pygame
+
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from training.common.filter import LowPassFilter
+from training.envs.assemble_mujoco_env import AssembleMuJoCoEnv
+from training.common import rl_utils
+
 
 class DataRecorder:
     COOLDOWN_SEC = 0.5
     DEADZONE = 0.1
     TOLERANCE = 5e-4
-    MAX_FINAL_YAW_DEG = 10.0  # 完成时 |yaw| 超过该角度的 episode 丢弃
-    def __init__(self, 
-                 xml_path, 
-                 urdf_path, save_data_path):
+    MAX_FINAL_YAW_DEG = 10.0
+
+    # B 切换手柄控制/自由控制，X 调速，Y 随机重置，Back 丢弃当前 episode，
+    # Start 录制开关，Guide 退出。
+    BUTTON_CONTROL_MODE = 1
+    BUTTON_SPEED = 2
+    BUTTON_RESET = 3
+    BUTTON_ABORT = 6
+    BUTTON_START = 7
+    BUTTON_EXIT = 8
+
+    def __init__(self, xml_path, urdf_path, save_data_path):
         self.xml_path = xml_path
         self.urdf_path = urdf_path
-        self.save_data_path = save_data_path
-        self.buttonCooldown = 0.0
+        self.save_data_path = str(save_data_path)
+        self.button_cooldown = 0.0
         self.is_recording = False
-        self.record_buffer = [[[],[],[]]]
-        self.action_zero = np.zeros(6)
-        self.move_mode = 0 # 0-快速,缩放1 1-中速,缩放2 2-慢速,缩放3
-        self.ctrl_mode = 0 # 0-手柄完全控制 1-自由控制
+        self.current_episode = deque()
+        self.completed_episodes = []
+        self.action_zero = np.zeros(6, dtype=np.float32)
+        self.ctrl_mode = 0  # 0=手柄控制并可记录，1=自由控制/鼠标拖动 MuJoCo
+        self.move_mode = 0
+        self._continuous_log_ctr = 0
         self._free_log_ctr = 0
-        # self.random_delta = np.array([
-        #             np.random.uniform(-0.001, 0.001),   # X: ±3mm
-        #             np.random.uniform(-0.001, 0.001),   # Y: ±3mm
-        #             np.random.uniform(-0.003, 0.003),   # Z: ±3mm 
-        #             np.random.uniform(-5, 5),           # yaw: ±5°
-        #             np.random.uniform(-0.003, 0.003),        # X: ±0mm
-        #             np.random.uniform(-0.003, 0.003),        # Y: ±0mm
-        #             np.random.uniform(-0.003, 0.003),        # Z: ±0mm 
-        #             np.random.uniform(-15, 15),         # Roll: ±15°
-        #             np.random.uniform(-15, 15),         # Pitch: ±15°
-        #             np.random.uniform(-30, 30)             # Yaw: ±0°
-        #         ])
-        self.random_delta = np.array([
-                        np.random.uniform(-0.001, 0.001),   # X: ±3mm
-                        np.random.uniform(-0.001, 0.001),   # Y: ±3mm
-                        np.random.uniform(-0.003, 0.003),   # Z: ±3mm 
-                        np.random.uniform(-5, 5),           # yaw: ±5°
-                        np.random.uniform(-0.001, 0.001),        # X: ±0mm
-                        np.random.uniform(-0.001, 0.001),        # Y: ±0mm
-                        np.random.uniform(-0.001, 0.001),        # Z: ±0mm 
-                        np.random.uniform(-10, 10),         # Roll: ±10°
-                        np.random.uniform(-10, 10),         # Pitch: ±10°
-                        np.random.uniform(-10, 10)             # Yaw: ±15°
-                    ])
-        self.filter = LowPassFilter(cutoff_freq=5, dt=0.1)
 
-        
-        # 创建AssembleMuJoCoEnv环境（录制始终存单帧，训练时 FrameStack 再叠）
-        self.env = AssembleMuJoCoEnv(xml_path=xml_path,
-                                     urdf_path=urdf_path,
-                                     render_mode="human",
-                                     is_use_force_control=True,
-                                     admittance_m=6.0,
-                                     admittance_j=0.6,
-                                     admittance_k_t=np.array([1800, 1800, 3000]),
-                                     admittance_k_r=np.array([12, 6, 20]),
-                                     admittance_zeta_t=2.2,
-                                     admittance_zeta_r=1.2,
-                                    #  admittance_b_r=400.0,
-                                    #  admittance_b_t=400.0,
-                                     admittance_force_deadzone=0.2,
-                                     admittance_torque_deadzone=0.01,
-                                     )
-        # self.env.ur5e_controller.admittance_controller.set_axis_mask([0, 0, 0, 1, 0, 0])
+        self.random_delta = self._sample_random_delta()
+        self.filter = LowPassFilter(cutoff_freq=5, dt=0.05)
+        self.env = AssembleMuJoCoEnv(
+            xml_path=xml_path,
+            urdf_path=urdf_path,
+            render_mode="human",
+            is_use_force_control=True,
+            admittance_m=6.0,
+            admittance_j=0.6,
+            admittance_k_t=np.array([1800, 1800, 3000]),
+            admittance_k_r=np.array([12, 6, 20]),
+            admittance_zeta_t=2.2,
+            admittance_zeta_r=1.2,
+            admittance_force_deadzone=0.1,
+            admittance_torque_deadzone=0.005,
+        )
+        self.env.is_teleoperation = False
+        self.env.reset(options={"random_delta": self.random_delta})
 
-        # 环境复位
-        self.env.reset(options={'random_delta': self.random_delta})
-
-        # 配置 logging
         logging.basicConfig(
             level=logging.INFO,
             format="%(asctime)s [%(levelname)s] %(message)s",
-            datefmt="%Y-%m-%d %H:%M:%S"
+            datefmt="%Y-%m-%d %H:%M:%S",
         )
-        self.logger = logging.getLogger(__name__)
+        self.logger = logging.getLogger(self.__class__.__name__)
 
-        # 初始化硬件输入
         pygame.init()
         pygame.joystick.init()
-        self.joystick = pygame.joystick.Joystick(0) if pygame.joystick.get_count() > 0 else None
-        if self.joystick: self.joystick.init()
-        else:
-            self.logger.error("未检测到手柄")
-            exit()
+        self.joystick = (
+            pygame.joystick.Joystick(0)
+            if pygame.joystick.get_count() > 0 else None
+        )
+        if self.joystick is None:
+            raise RuntimeError("未检测到手柄")
+        self.joystick.init()
 
-        # 初始化和首次 reset 完成后冻结长期对象，避免录制热路径扫描旧对象图
         gc.collect()
         gc.freeze()
 
-    def record_toggle(self):
-        if self.is_recording:
-            self.is_recording = False
-            self.logger.info("录制停止。")
+    @staticmethod
+    def _sample_random_delta():
+        # return np.array([
+        #     np.random.uniform(-0.001, 0.001),
+        #     np.random.uniform(-0.001, 0.001),
+        #     np.random.uniform(-0.003, 0.003),
+        #     np.random.uniform(-5, 5),
+        #     np.random.uniform(-0.001, 0.001),
+        #     np.random.uniform(-0.001, 0.001),
+        #     np.random.uniform(-0.001, 0.001),
+        #     np.random.uniform(-10, 10),
+        #     np.random.uniform(-10, 10),
+        #     np.random.uniform(-10, 10),
+        # ], dtype=np.float64)
+
+        return np.array([
+                    np.random.uniform(-0.001, 0.001),
+                    np.random.uniform(-0.001, 0.001),
+                    np.random.uniform(-0.003, 0.003),
+                    np.random.uniform(-5, 5),
+                    np.random.uniform(-0.003, 0.003),
+                    np.random.uniform(-0.003, 0.003),
+                    np.random.uniform(-0.003, 0.003),
+                    np.random.uniform(-15, 15),
+                    np.random.uniform(-15, 15),
+                    np.random.uniform(-30, 30),
+                ], dtype=np.float64)
+
+    def _reset_environment(self, discard_current=True):
+        if discard_current:
+            self.current_episode.clear()
+        self.random_delta = self._sample_random_delta()
+        self.filter.reset()
+        self.move_mode = 0
+        self._free_log_ctr = 0
+        self.env.reset(options={"random_delta": self.random_delta})
+        self.env.is_teleoperation = self.ctrl_mode == 1
+
+    def _finish_episode(self, info, terminated, truncated):
+        """只保留成功且最终 yaw 合格的完整 episode。"""
+        if not self.current_episode:
+            return
+        success = bool(info.get("success", False))
+        if terminated and success and not truncated:
+            final_state = self.current_episode[-1]["state"]
+            final_yaw_deg = float(np.degrees(final_state[3]))
+            if abs(final_yaw_deg) <= self.MAX_FINAL_YAW_DEG:
+                self.completed_episodes.append(self.current_episode)
+                self.logger.info(
+                    "当前 episode 完成：steps=%d，最终 yaw=%.1f°",
+                    len(self.current_episode), final_yaw_deg,
+                )
+            else:
+                self.logger.warning(
+                    "最终 yaw=%.1f°超过阈值 %.0f°，丢弃当前 episode",
+                    final_yaw_deg, self.MAX_FINAL_YAW_DEG,
+                )
         else:
-            self.logger.info("录制开始 (Recording ON)")
-            self.record_buffer[-1] = [[],[],[]]
-            self.is_recording = True
+            self.logger.info(
+                "当前 episode 未成功完成，丢弃 steps=%d",
+                len(self.current_episode),
+            )
+        self.current_episode = deque()
 
-    def reset_toggle(self):
-        # self.random_delta = np.array([
-        #         np.random.uniform(-0.001, 0.001),   # X: ±3mm
-        #         np.random.uniform(-0.001, 0.001),   # Y: ±3mm
-        #         np.random.uniform(-0.003, 0.003),   # Z: ±3mm 
-        #         np.random.uniform(-5, 5),           # yaw: ±5°
-        #         np.random.uniform(-0.003, 0.003),        # X: ±0mm
-        #         np.random.uniform(-0.003, 0.003),        # Y: ±0mm
-        #         np.random.uniform(-0.003, 0.003),        # Z: ±0mm 
-        #         np.random.uniform(-15, 15),         # Roll: ±15°
-        #         np.random.uniform(-15, 15),         # Pitch: ±15°
-        #         np.random.uniform(-30, 30)             # Yaw: ±0°
-        #     ])
-        self.random_delta = np.array([
-                np.random.uniform(-0.001, 0.001),   # X: ±3mm
-                np.random.uniform(-0.001, 0.001),   # Y: ±3mm
-                np.random.uniform(-0.003, 0.003),   # Z: ±3mm 
-                np.random.uniform(-5, 5),           # yaw: ±5°
-                np.random.uniform(-0.001, 0.001),        # X: ±0mm
-                np.random.uniform(-0.001, 0.001),        # Y: ±0mm
-                np.random.uniform(-0.001, 0.001),        # Z: ±0mm 
-                np.random.uniform(-10, 10),         # Roll: ±10°
-                np.random.uniform(-10, 10),         # Pitch: ±10°
-                np.random.uniform(-10, 10)             # Yaw: ±15°
-            ])
-        # self.random_delta = np.array([
-        #     np.random.uniform(-0.001, 0.001),   # X: ±3mm
-        #     np.random.uniform(-0.001, 0.001),   # Y: ±3mm
-        #     np.random.uniform(-0.003, 0.003),   # Z: ±3mm 
-        #     np.random.uniform(-5, 5),           # yaw: ±5°
-        #     np.random.uniform(-0.00, 0.00),        # X: ±0mm
-        #     np.random.uniform(-0.00, 0.00),        # Y: ±0mm
-        #     np.random.uniform(-0.00, 0.00),        # Z: ±0mm 
-        #     np.random.uniform(-10, 10),         # Roll: ±10°
-        #     np.random.uniform(-10, 10),         # Pitch: ±10°
-        #     np.random.uniform(0, 0)             # Yaw: ±0°
-        # ])
-        self.logger.info(("="*7)+"随机重置已更新"+("="*7))
-        
-    def joystick_control(self):
-        if not self.joystick: return False
-        pygame.event.pump()
+    def _edge_button(self, button, now):
+        if button >= self.joystick.get_numbuttons():
+            return False
+        if not self.joystick.get_button(button):
+            return False
+        if now - self.button_cooldown <= self.COOLDOWN_SEC:
+            return False
+        self.button_cooldown = now
+        return True
 
-        # 录环境归一化后的 10 维单帧（与 reset/step 观测一致）；stack 在 load_data 时转换
-        observation = self.env._get_observation()
+    def _button(self, button):
+        if button >= self.joystick.get_numbuttons():
+            return 0
+        return int(self.joystick.get_button(button))
+
+    def _read_joystick_action(self):
+        ax0, ax1, ax2 = (
+            self.joystick.get_axis(0),
+            self.joystick.get_axis(1),
+            self.joystick.get_axis(2),
+        )
+        ax2 = (1 + ax2) / 2
+        dx = -(abs(ax1) > self.DEADZONE) * ax1
+        dy = -(abs(ax0) > self.DEADZONE) * ax0
+        dz = (abs(ax2) > self.DEADZONE) * (2 * self._button(4) - 1) * ax2
+
+        ax3, ax4, ax5 = (
+            self.joystick.get_axis(3),
+            self.joystick.get_axis(4),
+            self.joystick.get_axis(5),
+        )
+        ax5 = (1 + ax5) / 2
+        dr_x = (abs(ax3) > self.DEADZONE) * ax3
+        dr_y = -(abs(ax4) > self.DEADZONE) * ax4
+        dr_z = (abs(ax5) > self.DEADZONE) * (1 - 2 * self._button(5)) * ax5
+
+        raw_action = np.concatenate(([dx, dy, dz], [dr_x, dr_y, dr_z])).astype(np.float32)
+        raw_action /= float(self.move_mode + 1)
+        action = self.filter.filter(raw_action)
+        if np.all(np.abs(action) < self.TOLERANCE):
+            return self.action_zero.copy()
+        return np.asarray(action, dtype=np.float32)
+
+    def _handle_buttons(self):
         now = time.time()
-        # # A 键 (0): 当前条录制完成
-        # if self.joystick.get_button(0) and (now - self.buttonCooldown > self.COOLDOWN_SEC):
-        #     self.buttonCooldown = now
-        #     self.env.reset(options={'random_delta': self.random_delta})
-        #     self.move_mode = 0
-        #     self.filter.reset()
-        #     if self.is_recording:
-        #         self.record_buffer.append([[],[],[]])
-        #         self.logger.info(f"当前条录制完成。开始录制第{len(self.record_buffer)}条录制")
-        # B 键 (1)：切换控制模型
-        if  self.joystick.get_button(1) and (now - self.buttonCooldown > self.COOLDOWN_SEC):
-            self.buttonCooldown = now
+        if self._edge_button(self.BUTTON_CONTROL_MODE, now):
             self.ctrl_mode = (self.ctrl_mode + 1) % 2
-            self.env.reset(options={'random_delta': self.random_delta})
-            self.move_mode = 0
-            self.filter.reset()
-            self.logger.info(f"切换控制模型为 {self.ctrl_mode} (0-手柄完全控制, 1-自由控制)")
-        # X 键 (2): 切换移动模式
-        if self.joystick.get_button(2) and (now - self.buttonCooldown > self.COOLDOWN_SEC):
-            self.buttonCooldown = now
+            self.logger.info(
+                "切换控制模式为 %d（0-手柄控制，1-自由控制/鼠标拖动）",
+                self.ctrl_mode,
+            )
+            # 模式切换会改变控制语义，当前未完成 episode 不应跨模式保存。
+            self._reset_environment(discard_current=True)
+            self.env.is_teleoperation = self.ctrl_mode == 1
+
+        if self._edge_button(self.BUTTON_SPEED, now):
             self.move_mode = (self.move_mode + 1) % 3
-            self.logger.info(f"切换移动模式为 {self.move_mode} (0-快速 1.5mm/step, 1-中速 0.75mm/step, 2-慢速 0.5mm/step)")
-        # Y 键 (3): 随机重置并更新
-        if self.joystick.get_button(3) and (now - self.buttonCooldown > self.COOLDOWN_SEC):
-            self.buttonCooldown = now
-            self.filter.reset()
-            self.reset_toggle()
-            self.env.reset(options={'random_delta': self.random_delta})
-            self.move_mode = 0
+            self.logger.info(
+                "移动速度模式=%d（缩放 1/%d）",
+                self.move_mode, self.move_mode + 1,
+            )
+        if self._edge_button(self.BUTTON_RESET, now):
+            self.logger.info("随机重置并丢弃当前 episode, 当前已录制 %d 个 episode", len(self.completed_episodes))
+            self._reset_environment(discard_current=True)
+        if self._edge_button(self.BUTTON_ABORT, now):
+            self.logger.info("退出当前 episode 并丢弃数据, 当前已录制 %d 个 episode", len(self.completed_episodes))
+            self._reset_environment(discard_current=True)
+        if self._edge_button(self.BUTTON_START, now):
             if self.is_recording:
-                self.record_buffer[-1] = [[],[],[]]
-        # back 键 (6): 退出当前条录制
-        if self.is_recording and self.joystick.get_button(6) and (now - self.buttonCooldown > self.COOLDOWN_SEC):
-            self.buttonCooldown = now
-            self.filter.reset()
-            self.env.reset(options={'random_delta': self.random_delta})
-            self.move_mode = 0
-            if self.is_recording:
-                self.record_buffer[-1] = [[],[],[]]
-            self.logger.info(f"当前条录制退出。{len(self.record_buffer)-1}条录制完成")
-        # start 键 (7): 录制开关
-        if self.joystick.get_button(7) and (now - self.buttonCooldown > self.COOLDOWN_SEC):
-            self.buttonCooldown = now
-            self.env.reset(options={'random_delta': self.random_delta})
-            self.move_mode = 0
-            self.filter.reset()
-            self.record_toggle()
-
-        # 位置控制 (左摇杆)
-        ax0, ax1, ax2 = self.joystick.get_axis(0), self.joystick.get_axis(1), self.joystick.get_axis(2)
-        ax2 = (1 + ax2) / 2 # 将轴范围从 [-1, 1] 映射到 [0, 1]  
-        dx = -(abs(ax1) > self.DEADZONE) * ax1 
-        dy = -(abs(ax0) > self.DEADZONE) * ax0 
-        dz = (abs(ax2) > self.DEADZONE) * (2* self.joystick.get_button(4) - 1) * ax2   # LB 控制 Z 轴上下 
-        delta_pos = np.array([dx, dy, dz])
-
-        # 旋转控制 (右摇杆)
-        ax3, ax4, ax5 = self.joystick.get_axis(3), self.joystick.get_axis(4), self.joystick.get_axis(5)
-        ax5 = (1 + ax5) / 2  
-        dr_x = (abs(ax3) > self.DEADZONE) * ax3 
-        dr_y = -(abs(ax4) > self.DEADZONE) * ax4 
-        dr_z = (abs(ax5) > self.DEADZONE) * (1 - 2* self.joystick.get_button(5)) * ax5 # RB 控制 Z 轴旋转方向
-        delta_euler = np.array([dr_x, dr_y, dr_z])
-
-        if self.ctrl_mode == 0:
-            raw_action = np.concatenate([delta_pos / (self.move_mode + 1),
-                                         delta_euler / (self.move_mode + 1)])
-            if np.allclose(raw_action, self.action_zero, rtol=0, atol=1e-6):
-                self.filter.reset()
-                action = self.action_zero
+                self.is_recording = False
+                self.current_episode.clear()
+                self.logger.info("录制停止，未完成 episode 已丢弃, 当前已录制 %d 个 episode", len(self.completed_episodes))
             else:
-                action = self.filter.filter(raw_action)
+                self._reset_environment(discard_current=True)
+                self.is_recording = True
+                self.logger.info("录制开始（固定 20Hz 连续模式）")
 
-            if not np.allclose(self.action_zero, action, rtol=0, atol=self.TOLERANCE):
-                obs, reward, terminated, truncated, info = self.env.step(action)
-                if self.is_recording:
-                    self.logger.info(f"记录动作: {action}, 当前步数: {self.env.current_step}, 深度: {info['depth']}, 状态: {info['state']}, \
-                                     力: {info['force']}, 力矩: {info['torque']}, 位置误差xy: {info['position_error_xy']}, \
-                                     导纳偏移: {info['admittance_dx']}mm, 偏角: {info['angle_z']}, yaw误差: {info['yaw_error']}")
-                    
-                    self.record_buffer[-1][0].append(observation)
-                    self.record_buffer[-1][1].append(action)
-                    self.record_buffer[-1][2].append(terminated or truncated)
+    def _free_control_step(self):
+        """自由控制模式：持续运行力控，允许用 MuJoCo viewer 鼠标拖动机械臂。"""
+        self.env.is_teleoperation = True
+        _, info = self.env.mujoco_step()
+        self._free_log_ctr += 1
+        if self._free_log_ctr % 5 == 0:
+            actual_pos = self.env.data.site_xpos[self.env.eef_site_id].copy()
+            ctrl = self.env.ur5e_controller
+            self.logger.info(
+                "自由控制: actual_pos=%s | |F|=%.3fN | |T|=%.3fNm | "
+                "admittance_dx=%s | state=%s",
+                np.round(actual_pos, 4),
+                float(np.linalg.norm(ctrl.calibrated_ft[:3])),
+                float(np.linalg.norm(ctrl.calibrated_ft[3:])),
+                np.round(ctrl.admittance_dx, 6),
+                info.get("state"),
+            )
 
-                    done = info['success']
-                    if terminated and not done:
-                        self.env.reset(options={'random_delta': self.random_delta})
-                        self.filter.reset()
-                        self.move_mode = 0
-                        self.record_buffer[-1] = [[],[],[]]
-                        self.logger.info(f"当前装配任务失败，录制退出，{len(self.record_buffer)-1}条录制完成，输出信息为：{info}")
-                    elif truncated:
-                        self.env.reset(options={'random_delta': self.random_delta})
-                        self.filter.reset()
-                        self.move_mode = 0
-                        self.record_buffer[-1] = [[],[],[]]
-                        self.logger.info(f"当前装配任务被截断，录制退出，{len(self.record_buffer)-1}条录制完成，输出信息为：{info}")
-                    elif done:
-                        final_yaw = self.record_buffer[-1][0][-1][3]
-                        final_yaw_deg = np.degrees(final_yaw)
-                        self.env.reset(options={'random_delta': self.random_delta})
-                        self.filter.reset()
-                        self.move_mode = 0
-                        if abs(final_yaw_deg) > self.MAX_FINAL_YAW_DEG:
-                            self.record_buffer[-1] = [[],[],[]]
-                            self.logger.warning(f"最终yaw={final_yaw_deg:.1f}°超过阈值{self.MAX_FINAL_YAW_DEG:.0f}°，丢弃该条录制，{len(self.record_buffer)-1}条录制完成")
-                        else:
-                            self.record_buffer.append([[],[],[]])
-                            self.logger.info(f"当前装配任务完成，完成录制第{len(self.record_buffer)-1}条录制，最终yaw={final_yaw_deg:.1f}°，输出信息为：{info}")
-        elif self.ctrl_mode == 1: 
-            raw_action = np.concatenate([delta_pos / (self.move_mode + 1),
-                                                     delta_euler / (self.move_mode + 1)])
-            if np.allclose(raw_action, self.action_zero, rtol=0, atol=1e-6):
-                self.filter.reset()
-                action = self.action_zero
-            else:
-                action = self.filter.filter(raw_action)
-                
-            if not np.allclose(self.action_zero, action, rtol=0, atol=self.TOLERANCE):
-                obs, reward, terminated, truncated, info = self.env.step(action)
-                # 每 5 步输出一次期望/实际位姿（每步都打会明显拖慢循环）
-                self._free_log_ctr += 1
-                if self._free_log_ctr % 5 == 0:
-                    ctrl = self.env.ur5e_controller
-                    actual_pos = self.env.data.site_xpos[self.env.eef_site_id].copy()
-                    actual_euler = np.degrees(rotmat_to_euler(
-                        self.env.data.site_xmat[self.env.eef_site_id].reshape(3, 3)))
-                    des_euler = np.degrees(quat_to_euler(self.env.last_quat))
-                    self.logger.info(
-                        f"期望: pos={np.round(self.env.last_pos, 4)}, euler(deg)={np.round(des_euler, 2)} | "
-                        f"实际: pos={np.round(actual_pos, 4)}, euler(deg)={np.round(actual_euler, 2)} | "
-                        f"位置误差: {np.linalg.norm(self.env.last_pos - actual_pos) * 1000:.2f}mm | "
-                        f"|F|: {np.linalg.norm(ctrl.calibrated_ft[:3]):.2f}N "
-                        f"导纳偏移: {np.linalg.norm(ctrl.admittance_dx) * 1000:.2f}mm")
-                    self.logger.info(f"action_pos={action[:3]}, action_rot={action[3:]}")
-        
-        return self.joystick.get_button(8) # Start 键退出
+    def _control(self, observation):
+        if self.ctrl_mode == 1:
+            self._free_control_step()
+            return self._button(self.BUTTON_EXIT)
 
+        self.env.is_teleoperation = False
+        action = self._read_joystick_action()
+        obs, reward, terminated, truncated, info = self.env.step(action)
+        self._continuous_log_ctr += 1
+
+        if self.is_recording:
+            self.current_episode.append({
+                "state": np.asarray(observation, dtype=np.float32).copy(),
+                "action": action.copy(),
+                "done": float(terminated or truncated),
+            })
+            if self._continuous_log_ctr % 5 == 0:
+                self.logger.info(
+                    "连续采集: action=%s，当前步数=%d，深度=%s，状态=%s，力=%s，力矩=%s",
+                    action,
+                    self.env.current_step,
+                    info.get("depth"),
+                    info.get("state"),
+                    info.get("force"),
+                    info.get("torque"),
+                )
+            if terminated or truncated:
+                self._finish_episode(info, terminated, truncated)
+                self._reset_environment(discard_current=False)
+        return self._button(self.BUTTON_EXIT)
+
+    @staticmethod
+    def _episodes_to_arrays(episodes):
+        states, actions, dones = [], [], []
+        for episode in episodes:
+            if not episode:
+                continue
+            states.append(np.stack([t["state"] for t in episode]).astype(np.float32))
+            actions.append(np.stack([t["action"] for t in episode]).astype(np.float32))
+            dones.append(np.asarray([t["done"] for t in episode], dtype=np.float32))
+        if not states:
+            return (
+                np.zeros((0, 10), dtype=np.float32),
+                np.zeros((0, 6), dtype=np.float32),
+                np.zeros((0,), dtype=np.float32),
+            )
+        return np.concatenate(states), np.concatenate(actions), np.concatenate(dones)
+
+    def _save_data(self):
+        new_states, new_actions, new_dones = self._episodes_to_arrays(self.completed_episodes)
+        current_episode_count = len(self.completed_episodes)
+        current_transition_count = int(len(new_states))
+        if current_transition_count == 0:
+            self.logger.info("本次没有成功完成的 episode，未保存")
+            return
+
+        if os.path.exists(self.save_data_path):
+            with np.load(self.save_data_path, allow_pickle=False) as old:
+                old_states = np.asarray(old["states"], dtype=np.float32)
+                old_actions = np.asarray(old["actions"], dtype=np.float32)
+                old_dones = np.asarray(
+                    old["dones"] if "dones" in old.files else old["done"],
+                    dtype=np.float32,
+                )
+            new_states = np.concatenate([old_states, new_states], axis=0)
+            new_actions = np.concatenate([old_actions, new_actions], axis=0)
+            new_dones = np.concatenate([old_dones, new_dones], axis=0)
+
+        np.savez_compressed(
+            self.save_data_path,
+            states=new_states,
+            actions=new_actions,
+            dones=new_dones,
+        )
+        total_episode_count = int(np.sum(new_dones > 0.5))
+        total_transition_count = int(len(new_states))
+        self.logger.info(
+            "数据已更新：本次保存 episodes=%d、transitions=%d；累计 episodes=%d、transitions=%d",
+            current_episode_count,
+            current_transition_count,
+            total_episode_count,
+            total_transition_count,
+        )
 
     def recode_run(self):
         step_wall = self.env.force_ctrl_steps * self.env.model.opt.timestep
         t_next = time.perf_counter()
         try:
             while True:
-                if self.joystick_control(): 
-                    self.logger.info("录制中断。") 
-                    self.record_buffer[-1] = [[],[],[]] # 录制中断时，丢弃当前条数据
+                pygame.event.pump()
+                self._handle_buttons()
+                observation = self.env._get_observation()
+                if self._control(observation):
+                    self.logger.info("录制中断")
+                    self.current_episode.clear()
                     break
-
                 t_next += step_wall
                 delay = t_next - time.perf_counter()
                 if delay > 0:
@@ -309,72 +358,20 @@ class DataRecorder:
                 else:
                     t_next = time.perf_counter()
         except KeyboardInterrupt:
-            if self.is_recording:
-                self.logger.info("录制中断。") 
-                self.record_buffer[-1] = [[],[],[]] # 录制中断时，丢弃当前条数据
+            self.current_episode.clear()
+            self.logger.info("录制中断，未完成 episode 已丢弃")
         finally:
-            # 条件判断
-            if self.is_recording and len(self.record_buffer[0][0]) > 0:
-                max_yaw_rad = np.radians(self.MAX_FINAL_YAW_DEG)
-                record_len = 0
-                # 本次新数据
-                new_states, new_actions, new_dones= [], [], []   
-                for record in self.record_buffer:
-                    if len(record[0]) > 0:
-                        if record[2][-1] == True:
-                            final_yaw = record[0][-1][3]
-                            if abs(final_yaw) > max_yaw_rad:
-                                self.logger.warning(f"保存时过滤：最终yaw={np.degrees(final_yaw):.1f}°超过阈值{self.MAX_FINAL_YAW_DEG:.0f}°，丢弃该条")
-                                continue
-                            record_len += 1
-                            new_states.append(np.array(record[0], dtype=np.float32))
-                            new_actions.append(np.array(record[1], dtype=np.float32))
-                            new_dones.append(np.array(record[2], dtype=np.float32))
-
-                # 追加已有数据（如果存在），同样按最终 yaw 过滤
-                if os.path.exists(self.save_data_path):
-                    old = np.load(self.save_data_path, allow_pickle=True)
-                    old_s, old_a, old_d = old['states'], old['actions'], old['dones']
-                    ep_ends = np.where(old_d > 0.5)[0]
-                    if len(ep_ends) > 0:
-                        ep_starts = np.concatenate([[0], ep_ends[:-1] + 1])
-                        kept_old_s, kept_old_a, kept_old_d = [], [], []
-                        removed_old = 0
-                        for s, e in zip(ep_starts, ep_ends + 1):
-                            if abs(old_s[e - 1, 3]) <= max_yaw_rad:
-                                kept_old_s.append(old_s[s:e])
-                                kept_old_a.append(old_a[s:e])
-                                kept_old_d.append(old_d[s:e])
-                            else:
-                                removed_old += 1
-                        if removed_old > 0:
-                            self.logger.warning(f"旧数据中过滤掉 {removed_old} 条最终yaw>{self.MAX_FINAL_YAW_DEG:.0f}°的记录")
-                        if kept_old_s:
-                            new_states.append(np.concatenate(kept_old_s))
-                            new_actions.append(np.concatenate(kept_old_a))
-                            new_dones.append(np.concatenate(kept_old_d))
-                    old.close() 
-
-                # 合并所有数据
-                new_states = np.concatenate(new_states)
-                new_actions = np.concatenate(new_actions)
-                new_dones = np.concatenate(new_dones)
-
-                # 保存
-                np.savez(self.save_data_path, states=new_states, actions=new_actions, dones=new_dones)
-                self.logger.info(f"录制数据已保存到 {self.save_data_path}，本次共录制 {record_len} 条数据")
-            else:
-                self.logger.info(f"没有录制到数据，未保存。")
+            self._save_data()
             self.env.close()
             pygame.quit()
 
 
 if __name__ == "__main__":
     root_dir = rl_utils.find_project_root()
-    save_data_dir = root_dir/"datasets"
-    xml_path = str(root_dir/"mjcf/ur5e_assemble_sence.xml")
-    urdf_path = str(root_dir/"urdf/ur5e_assemble.urdf")
-    save_data_path = save_data_dir/"recorded_data.npz"
+    save_data_dir = root_dir / "datasets"
+    xml_path = str(root_dir / "assets/mjcf/ur5e_assemble_sence.xml")
+    urdf_path = str(root_dir / "assets/urdf/ur5e_assemble.urdf")
+    save_data_path = save_data_dir / "recorded_expert_data.npz"
 
     recorder = DataRecorder(xml_path, urdf_path, save_data_path)
     recorder.recode_run()
