@@ -198,7 +198,7 @@ class SupervisedPolicyTrainer:
         best_val = float("inf")
         patience_count = 0
         try:
-            with tqdm(total=int(self.total_epochs), dynamic_ncols=True, ascii=True) as progress:
+            with tqdm(total=int(self.total_epochs)) as progress:
                 for epoch in range(int(self.total_epochs)):
                     train_loss = self.agent.fit_epoch(self.train_loader)
                     val_loss = self.agent.eval_epoch(self.val_loader)
@@ -295,7 +295,7 @@ class OffPolicyTrainer:
         last_time, last_step = time.perf_counter(), 0
         try:
             self.collector.reset(self.seed, options=self.reset_options)
-            with tqdm(total=self.total_timesteps, desc=type(self).__name__, dynamic_ncols=True, ascii=True, mininterval=0.5) as bar:
+            with tqdm(total=self.total_timesteps, desc=type(self).__name__, mininterval=0.5) as bar:
                 while self.global_step < self.total_timesteps:
                     warmup = self.global_step < self.learning_starts and not self.policy_warmup 
                     episodes = self.collector.step(warmup=warmup)
