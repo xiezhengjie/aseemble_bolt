@@ -9,7 +9,7 @@ debug.log
 # ─────────── 数据（体积大、可重新采集）───────────
 # 默认忽略。若想把专家数据纳入版本管理（约 18M），
 # 注释掉下面这行，并考虑改用 Git LFS。
-datasets/
+# datasets/
 
 # ─────────── Python ───────────
 __pycache__/
@@ -24,7 +24,9 @@ venv/
 .idea/
 .DS_Store
 .env
-
+.zcode
+.pytest_cache
+.playwright-mcp
 # ─────────── 3D 资产（约 87M）───────────
 # MuJoCo 运行必需，建议保留在仓库中；
 # 若嫌大请改用 Git LFS，或改为在 README 里说明获取方式。
