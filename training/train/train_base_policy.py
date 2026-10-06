@@ -83,6 +83,7 @@ def main(cfg: DictConfig):
     trainer.train()
 
     # 验证
+    set_seed(int(cfg.training.eval_seed))
     policy.load_model(MODE_DIR)
     env = AssembleMuJoCoEnv(
             xml_path=str(XML_PATH),
