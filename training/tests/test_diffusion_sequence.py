@@ -13,6 +13,7 @@ from training.common.buffer_utils import (
     ExpertBuffer, ExpertDataManager, ExpertSequenceDataset, SequenceSampler,
     create_indices,
 )
+from training.common.checkpoint import save_state_dict
 from training.model.base.conditional_unet1d import ConditionalUnet1D
 from training.policy.diffusion_policy import DiffusionPolicy
 
@@ -94,10 +95,88 @@ class SequenceDataTests(unittest.TestCase):
             np.testing.assert_array_equal(loaders[0].dataset.sampler.indices,
                                           repeat[0].dataset.sampler.indices)
             policy = make_policy()
+            sampler = loaders[0].dataset.sampler
+            train_frames = np.zeros(len(values), dtype=bool)
+            for start, end, _, _ in sampler.indices:
+                train_frames[start:end] = True
+            train_obs = sampler.replay_buffer['obs'][train_frames]
+            self.assertEqual(set(train_obs[:, 0]), episode_ids[0])
+            policy.fit_obs_normalizer(train_obs)
+            self.assertAlmostEqual(policy.obs_normalizer.count, 20 + 1e-4)
+            count = policy.obs_normalizer.count
             before = next(policy.model.parameters()).detach().clone()
             self.assertTrue(np.isfinite(policy.fit_epoch(loaders[0])))
             self.assertFalse(torch.equal(before, next(policy.model.parameters())))
             self.assertTrue(np.isfinite(policy.eval_epoch(loaders[1])))
+            self.assertEqual(policy.obs_normalizer.count, count)
+
+
+class NormalizationTests(unittest.TestCase):
+    def test_training_normalizes_only_observations(self):
+        policy = make_policy()
+        policy.fit_obs_normalizer(np.array([[10.], [30.]]))
+        obs = torch.full((2, 2, 1), 30.)
+        actions = torch.full((2, 8, 1), .75)
+        original_obs, original_actions = obs.clone(), actions.clone()
+        count = policy.obs_normalizer.count
+        with patch.object(policy.noise_scheduler, 'add_noise',
+                          wraps=policy.noise_scheduler.add_noise) as add_noise:
+            with patch.object(policy.model, 'forward', wraps=policy.model.forward) as forward:
+                loss = policy.compute_loss({'obs': obs, 'action': actions})
+        self.assertTrue(torch.isfinite(loss))
+        torch.testing.assert_close(add_noise.call_args.args[0], actions)
+        torch.testing.assert_close(forward.call_args.kwargs['global_cond'],
+                                   policy.obs_normalizer.normalize(obs).reshape(2, -1))
+        torch.testing.assert_close(obs, original_obs)
+        torch.testing.assert_close(actions, original_actions)
+        self.assertEqual(policy.obs_normalizer.count, count)
+        self.assertTrue(policy.inference_noise_scheduler.config.clip_sample)
+
+    def test_prediction_normalizes_observations_and_preserves_actions(self):
+        policy = make_policy()
+        policy.fit_obs_normalizer(np.array([[10.], [30.]]))
+        obs = torch.full((2, 2, 1), 30.)
+        plan = torch.full((2, 8, 1), .75)
+        with patch.object(policy, 'conditional_sample', return_value=plan) as sample:
+            prediction = policy.predict_action({'obs': obs})
+            actions = policy.sample(obs)
+        torch.testing.assert_close(prediction['action_full'], plan)
+        torch.testing.assert_close(prediction['action_pred'], plan)
+        torch.testing.assert_close(prediction['action'], plan[:, :4])
+        torch.testing.assert_close(actions, plan[:, :4])
+        torch.testing.assert_close(sample.call_args.kwargs['global_cond'],
+                                   policy.obs_normalizer.normalize(obs).reshape(2, -1))
+        policy.reset()
+        prediction = policy.predict_action({'obs': obs})
+        torch.testing.assert_close(policy.prev_naction[:, :4], prediction['action_full'][:, 4:])
+
+    def test_checkpoint_round_trip_and_legacy_loading(self):
+        with tempfile.TemporaryDirectory() as folder:
+            policy = make_policy()
+            policy.fit_obs_normalizer(np.array([[10.], [30.]]))
+            policy.obs_normalizer.epsilon = 1e-3
+            policy.obs_normalizer.clip = 10.
+            policy.save_model(folder)
+            loaded = make_policy()
+            loaded.load_model(folder)
+            self.assertIsNotNone(loaded.obs_normalizer)
+            self.assertEqual(loaded.obs_normalizer.state_dict(), policy.obs_normalizer.state_dict())
+            self.assertEqual(loaded.obs_normalizer.epsilon, policy.obs_normalizer.epsilon)
+            self.assertEqual(loaded.obs_normalizer.clip, policy.obs_normalizer.clip)
+            obs = torch.full((1, 2, 1), 30.)
+            torch.manual_seed(7)
+            expected = policy.sample(obs)
+            torch.manual_seed(7)
+            torch.testing.assert_close(loaded.sample(obs), expected)
+            legacy = Path(folder) / 'legacy'
+            save_state_dict(policy.model.state_dict(), legacy, 'policy_net')
+            loaded.load_model(legacy)
+            self.assertIsNone(loaded.obs_normalizer)
+            self.assertTrue(loaded.inference_noise_scheduler.config.clip_sample)
+            self.assertIsNone(loaded.prev_naction)
+            loaded.save_model(folder)
+            policy.load_model(folder)
+            self.assertIsNone(policy.obs_normalizer)
 
 
 class MotionPriorTests(unittest.TestCase):

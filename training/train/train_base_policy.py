@@ -9,6 +9,7 @@ sys.path.insert(0, str(ROOT_DIR))
 os.environ.setdefault("CUBLAS_WORKSPACE_CONFIG", ":4096:8")
 
 import hydra
+import numpy as np
 import torch
 import wandb
 import logging
@@ -60,7 +61,14 @@ def main(cfg: DictConfig):
 
     # 策略创建
     policy: DiffusionPolicy =  hydra.utils.instantiate(cfg.policy).to(device)
-    policy.to(device)
+    sampler = train_loader.dataset.sampler
+    data = sampler.replay_buffer
+    train_frames = np.zeros(len(data['obs']), dtype=bool)
+    for start, end, _, _ in sampler.indices:
+        train_frames[start:end] = True
+    if not train_frames.any():
+        raise ValueError("训练集没有可用于拟合归一化统计量的帧")
+    policy.fit_obs_normalizer(data['obs'][train_frames])
 
     # 训练
     trainer = SupervisedPolicyTrainer(

@@ -8,7 +8,8 @@ from diffusers.schedulers.scheduling_ddpm import DDPMScheduler
 from diffusers.schedulers.scheduling_ddim import DDIMScheduler
 from training.policy.base_policy import BasePolicy
 from training.model.base.conditional_unet1d import ConditionalUnet1D
-from training.common.checkpoint import load_state_dict, save_state_dict
+from training.common.checkpoint import has_weight, load_state_dict, save_state_dict
+from training.common.rl_utils import RunningMeanStd
 
 
 class DiffusionPolicy(BasePolicy):
@@ -45,6 +46,7 @@ class DiffusionPolicy(BasePolicy):
         self.n_action_steps = n_action_steps
         self.n_obs_steps = n_obs_steps
         self.kwargs = kwargs
+        self.obs_normalizer = None
 
         self.optimizer = torch.optim.AdamW(
             self.model.parameters(),
@@ -57,6 +59,12 @@ class DiffusionPolicy(BasePolicy):
         if num_inference_steps is None:
             num_inference_steps = noise_scheduler.config.num_train_timesteps
         self.num_inference_steps = num_inference_steps
+
+    def fit_obs_normalizer(self, obs):
+        """仅用训练集原始帧拟合状态统计量，训练和推理期间保持固定。"""
+        self.obs_normalizer = RunningMeanStd(shape=(self.obs_dim,))
+        self.obs_normalizer.update(obs)
+        self.reset()
 
     def reset(self):
         """新 episode 开始前清除上一回合的动作先验。"""
@@ -118,6 +126,8 @@ class DiffusionPolicy(BasePolicy):
         assert 'past_action' not in obs_dict, "past_action 作为条件尚未实现"
 
         obs = obs_dict["obs"].to(device=self.device, dtype=self.dtype)
+        if self.obs_normalizer is not None:
+            obs = self.obs_normalizer.normalize(obs)
         batch_size, obs_steps, obs_dim = obs.shape
 
         global_cond = obs[:, :self.n_obs_steps].reshape(batch_size, -1)
@@ -162,6 +172,8 @@ class DiffusionPolicy(BasePolicy):
 
         obs = batch['obs']          # (B, To, obs_dim)
         action = batch['action']    # (B, Ta, action_dim)
+        if self.obs_normalizer is not None:
+            obs = self.obs_normalizer.normalize(obs)
 
         global_cond = None
         trajectory = action
@@ -253,7 +265,22 @@ class DiffusionPolicy(BasePolicy):
         self.model.load_state_dict(load_state_dict(
             Path(model_dir), "policy_net", map_location=self.device,
         ))
+        self.obs_normalizer = None
+        if has_weight(model_dir, "obs_normalizer"):
+            state = load_state_dict(model_dir, "obs_normalizer", map_location="cpu")
+            if state is not None:
+                self.obs_normalizer = RunningMeanStd(
+                    (self.obs_dim,), epsilon=state['epsilon'], clip=state['clip'],
+                )
+                self.obs_normalizer.load_state_dict(state)
         self.reset()
 
     def save_model(self, model_dir):
         save_state_dict(self.model.state_dict(), model_dir, "policy_net")
+        normalizer = self.obs_normalizer
+        state = None if normalizer is None else {
+            **normalizer.state_dict(),
+            'epsilon': normalizer.epsilon,
+            'clip': normalizer.clip,
+        }
+        save_state_dict(state, model_dir, "obs_normalizer")
