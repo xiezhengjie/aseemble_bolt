@@ -54,6 +54,7 @@ def main(cfg: DictConfig):
         autoreset_mode=AutoresetMode.SAME_STEP,
     )
     eval_env = make_env(str(XML_PATH), str(URDF_PATH), max_episode_steps)()
+    eval_env.reset(seed=int(cfg.training.eval_env_seed))
     env.single_action_space.seed(seed)
     env.single_observation_space.seed(seed)
     state_dim = int(env.single_observation_space.shape[0])
@@ -104,9 +105,22 @@ def main(cfg: DictConfig):
     # 训练
     try:
         trainer.train()
+
+        # 终验
+        eval_seed = int(cfg.training.eval_seed)
+        set_seed(eval_seed)
+        if trainer.is_save_model:
+            agent.load_model(MODE_DIR / "final_model")
+        metrics = trainer.evaluator.evaluate(
+            eval_env,
+            n_episodes=trainer.final_eval_episodes,
+            seed_offset=eval_seed,
+        )
+        trainer.record_final_evaluation(metrics)
     finally:
         env.close()
         eval_env.close()
+        wb_run.finish()
 
 if __name__ == "__main__":
     main()

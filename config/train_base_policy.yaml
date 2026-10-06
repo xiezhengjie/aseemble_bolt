@@ -50,7 +50,7 @@ name: base_policy_diffusion
 
 logging:
   project: diffusion_policy_debug
-  resume: True
+  resume: False
   mode: online
   name: ${now:%Y.%m.%d-%H.%M.%S}_${name}
   tags: ["base_policy", "diffusion_policy"]

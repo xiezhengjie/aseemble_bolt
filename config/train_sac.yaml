@@ -21,6 +21,8 @@ trainer:
 
 training:
   seed: ${trainer.seed}     # set_seed 用
+  eval_env_seed: 100000
+  eval_seed: 200000
   buffer_size: 100000        # buffers.replay.capacity 用
 
 policy:
@@ -46,8 +48,8 @@ buffers:
 name: sac
 
 logging:
-  project: ur5e_assemble
-  resume: true
+  project: sac_debug
+  resume: false
   mode: online
   name: ${now:%Y.%m.%d-%H.%M.%S}_${name}
   tags: [sac]

@@ -20,11 +20,12 @@ class  Evaluator:
         return ep_peak_force, info
 
     def evaluate(self, env, n_episodes=20, seed_offset=100000):
-        """评估环境。"""
+        """评估环境；seed_offset=None 时延续环境已有的随机数序列。"""
         peak_forces, final_prev_states, returns, lengths, successes = [], [], [], [], []
     
         for ep in range(n_episodes):
-            ep_peak_force, info = self._episode(env, seed_offset + ep)
+            seed = None if seed_offset is None else seed_offset + ep
+            ep_peak_force, info = self._episode(env, seed)
             episode_info = info.get("final_info", {})
             returns.append(float(episode_info.get("episodic_return", 0.0)))
             lengths.append(int(episode_info.get("episodic_length", 0)))

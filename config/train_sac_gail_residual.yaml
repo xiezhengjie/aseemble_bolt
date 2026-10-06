@@ -16,8 +16,10 @@ trainer:
   eval_episodes: 10
   final_eval_episodes: 30
   log_interval: 100
+
   disc_updates: 2
   disc_batch_size: 256
+  
   env_reward_weight: 0.3
   gail_reward_coef: 1.0
   success_reward: 100.0
@@ -30,6 +32,8 @@ trainer:
 
 training:
   seed: ${trainer.seed}      # set_seed 用
+  eval_env_seed: 100000
+  eval_seed: 200000
   buffer_size: 200000         # buffers.replay.capacity 用
   generator_window: 50000    # buffers.generator.window_size 用
 
@@ -100,7 +104,7 @@ buffers:
 name: sac_gail_residual
 
 logging:
-  project: ur5e_assemble
+  project: sac_gail_residual_debug
   resume: true
   mode: online
   name: ${now:%Y.%m.%d-%H.%M.%S}_${name}

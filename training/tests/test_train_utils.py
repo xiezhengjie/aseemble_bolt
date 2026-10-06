@@ -1,17 +1,20 @@
 """无需 MuJoCo 的采集与训练回归测试。"""
 
+import importlib
+import random
 import unittest
-from unittest.mock import Mock
+from pathlib import Path
+from unittest.mock import Mock, call, patch
 
 import gymnasium as gym
 import numpy as np
 import torch
 from gymnasium.vector import AutoresetMode, SyncVectorEnv
 
-from training.common.eval_utils import ResidualEvaluator
+from training.common.eval_utils import Evaluator, ResidualEvaluator
 from training.common.buffer_utils import ExpertBuffer, GenWindowView, ReplayBuffer, ResidualReplayBuffer
 from training.common.rl_utils import EpisodeStatsWrapper
-from training.common.train_utils import DataCollector, GAILTrainer, ResidualDataCollector, ResidualGAILTrainer
+from training.common.train_utils import DataCollector, GAILTrainer, OffPolicyTrainer, ResidualDataCollector, ResidualGAILTrainer
 from training.policy.discriminator_policy import Discriminator
 
 
@@ -188,7 +191,7 @@ class TrainUtilsTest(unittest.TestCase):
         self.assertEqual(self.replay.size(), 8)
         self.assertEqual(self.agent.update.call_count, 3)
         self.assertEqual(trainer.discriminator.update.call_count, 6)
-        self.assertEqual(evaluator.evaluate.call_count, 3)
+        self.assertEqual(evaluator.evaluate.call_count, 2)
         np.testing.assert_array_equal(returns, [3, 3, 10])
         self.assertTrue(np.isfinite(trainer.disc_losses).all())
         self.agent.set_lr_scale.assert_called_with(0.3)
@@ -210,6 +213,166 @@ class TrainUtilsTest(unittest.TestCase):
         batch = self.agent.update.call_args.args[0]
         self.assertEqual(batch["states"].shape, (4, 2))
         self.assertEqual(batch["next_states"].shape, (4, 2))
+
+
+class EvaluationSeedTest(unittest.TestCase):
+    def setUp(self):
+        self.addCleanup(random.setstate, random.getstate())
+        self.addCleanup(np.random.set_state, np.random.get_state())
+        self.addCleanup(torch.set_rng_state, torch.get_rng_state())
+        self.evaluator = Mock()
+        self.stats = dict(success_rate=0.0, return_mean=0.0,
+                          return_std=0.0, peak_force_mean=0.0)
+        self.evaluator.evaluate.return_value = self.stats
+        self.trainer = OffPolicyTrainer(
+            Mock(), object(), Mock(), Mock(), 4,
+            collector=Mock(), evaluator=self.evaluator,
+            learning_starts=10, eval_interval=2,
+            eval_episodes=2, final_eval_episodes=3,
+            is_save_model=False, is_draw=False,
+        )
+
+    @staticmethod
+    def draw_random_values():
+        return random.random(), float(np.random.random()), float(torch.rand(()))
+
+    def test_periodic_evaluation_continues_global_rng_streams(self):
+        samples = []
+
+        def evaluate(*args, **kwargs):
+            samples.append(self.draw_random_values())
+            return self.stats
+
+        self.evaluator.evaluate.side_effect = evaluate
+        seed = 123
+        random.seed(seed)
+        np.random.seed(seed)
+        torch.set_rng_state(torch.Generator().manual_seed(seed).get_state())
+        python_rng = random.Random(seed)
+        numpy_rng = np.random.RandomState(seed)
+        torch_rng = torch.Generator().manual_seed(seed)
+        expected = [(python_rng.random(), float(numpy_rng.random()),
+                     float(torch.rand((), generator=torch_rng))) for _ in range(3)]
+        self.trainer._evaluate()
+        self.trainer._evaluate()
+        self.assertEqual(samples, expected[:2])
+        self.assertEqual(self.draw_random_values(), expected[2])
+        self.evaluator.evaluate.assert_has_calls([
+            call(self.trainer.eval_env, n_episodes=2, seed_offset=None),
+            call(self.trainer.eval_env, n_episodes=2, seed_offset=None),
+        ])
+
+    def test_environment_rng_continues_across_periodic_evaluations(self):
+        class RandomEnv(CounterEnv):
+            def reset(self, *, seed=None, options=None):
+                obs, info = super().reset(seed=seed, options=options)
+                samples.append(float(self.np_random.random()))
+                seeds.append(seed)
+                return obs, info
+
+        samples, seeds = [], []
+        env = RandomEnv(1)
+        self.addCleanup(env.close)
+        env.reset(seed=100000)
+        evaluator = Evaluator(Mock())
+        evaluator.evaluate(env, n_episodes=2, seed_offset=None)
+        evaluator.evaluate(env, n_episodes=2, seed_offset=None)
+        self.assertEqual(seeds, [100000, None, None, None, None])
+        np.testing.assert_array_equal(samples, np.random.default_rng(100000).random(5))
+        evaluator.evaluate(env, n_episodes=2, seed_offset=200000)
+        self.assertEqual(seeds[-2:], [200000, 200001])
+
+    def test_training_only_runs_periodic_evaluations(self):
+        self.trainer.env.num_envs = 1
+        self.trainer.collector.step.return_value = []
+        self.trainer.learning_starts = 0
+        self.trainer._update = Mock(return_value={})
+        self.trainer._save_checkpoint = Mock()
+        self.trainer.wb_run = Mock()
+        self.trainer.train()
+        self.assertEqual(self.evaluator.evaluate.call_count, 2)
+        self.trainer._save_checkpoint.assert_any_call("final_model", {})
+        self.assertEqual(self.trainer.final_stats, {})
+        self.trainer.wb_run.finish.assert_not_called()
+
+    def test_final_results_are_logged_and_saved(self):
+        self.trainer.wb_run = Mock()
+        self.trainer._save_checkpoint = Mock()
+        logged = []
+        self.trainer.wb_run.log.side_effect = lambda values, step: logged.append((dict(values), step))
+        self.trainer.record_final_evaluation(self.stats)
+        self.assertIs(self.trainer.final_stats, self.stats)
+        self.trainer._save_checkpoint.assert_called_once_with("final_model", self.stats)
+        self.assertEqual(logged, [({
+            "final_eval/success_rate": 0.0,
+            "final_eval/return_mean": 0.0,
+            "final_eval/peak_force_mean": 0.0,
+        }, 0)])
+
+
+class TrainingEntrypointEvaluationTest(unittest.TestCase):
+    def test_final_evaluation_and_cleanup_in_each_entrypoint(self):
+        from omegaconf import OmegaConf
+
+        root = Path(__file__).resolve().parents[2]
+        for name in ("train_sac", "train_sac_gail", "train_sac_gail_residual"):
+            module = importlib.import_module(f"training.train.{name}")
+            cfg = OmegaConf.load(root / "config" / f"{name}.yaml")
+            cfg.logging.name = "test"
+            for save_model, fails in ((True, False), (False, False), (True, True)):
+                with self.subTest(entrypoint=name, save_model=save_model, fails=fails):
+                    env, eval_env, agent, trainer, run = (Mock() for _ in range(5))
+                    env.single_observation_space.shape = (10,)
+                    env.single_action_space.shape = (6,)
+                    env.single_action_space.dtype = np.dtype("float32")
+                    trainer.is_save_model = save_model
+                    trainer.final_eval_episodes = 3
+                    metrics = dict(success_rate=1.0)
+                    trainer.evaluator.evaluate.return_value = metrics
+                    if fails:
+                        trainer.evaluator.evaluate.side_effect = RuntimeError("evaluation failed")
+                    events = Mock()
+                    events.attach_mock(trainer.train, "train")
+                    events.attach_mock(agent.load_model, "load")
+                    events.attach_mock(trainer.evaluator.evaluate, "evaluate")
+
+                    def instantiate(config, **kwargs):
+                        if config is cfg.trainer:
+                            return trainer
+                        if config is cfg.policy:
+                            agent.to.return_value = agent
+                            return agent
+                        return Mock()
+
+                    with patch.object(module.gym.vector, "AsyncVectorEnv", return_value=env), \
+                            patch.object(module, "make_env", return_value=lambda: eval_env), \
+                            patch.object(module.hydra.utils, "instantiate", side_effect=instantiate), \
+                            patch.object(module.wandb, "init", return_value=run), \
+                            patch.object(module.torch.cuda, "is_available", return_value=False), \
+                            patch.object(module, "set_seed") as seed:
+                        events.attach_mock(seed, "seed")
+                        if fails:
+                            with self.assertRaisesRegex(RuntimeError, "evaluation failed"):
+                                module.main.__wrapped__(cfg)
+                        else:
+                            module.main.__wrapped__(cfg)
+                            trainer.record_final_evaluation.assert_called_once_with(metrics)
+                        seed.assert_has_calls([
+                            call(int(cfg.training.seed)), call(int(cfg.training.eval_seed)),
+                        ])
+                        self.assertEqual(seed.call_count, 2)
+                        eval_env.reset.assert_called_once_with(seed=int(cfg.training.eval_env_seed))
+                        expected = [call.train(), call.seed(int(cfg.training.eval_seed))]
+                        if save_model:
+                            expected.append(call.load(module.MODE_DIR / "final_model"))
+                        else:
+                            agent.load_model.assert_not_called()
+                        expected.append(call.evaluate(eval_env, n_episodes=3,
+                                                      seed_offset=int(cfg.training.eval_seed)))
+                        events.assert_has_calls(expected)
+                    env.close.assert_called_once_with()
+                    eval_env.close.assert_called_once_with()
+                    run.finish.assert_called_once_with()
 
 
 if __name__ == "__main__":
