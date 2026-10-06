@@ -11,6 +11,7 @@ os.environ.setdefault("CUBLAS_WORKSPACE_CONFIG", ":4096:8")
 import hydra
 import torch
 import wandb
+import logging
 from omegaconf import DictConfig, OmegaConf
 from training.common.buffer_utils import ExpertDataManager
 from training.common.eval_utils import BaseChunkPolicyEvaluator
@@ -26,6 +27,8 @@ XML_PATH = ROOT_DIR / "assets/mjcf/ur5e_assemble_sence.xml"
 URDF_PATH = ROOT_DIR / "assets/urdf/ur5e_assemble.urdf"
 MODE_DIR = ROOT_DIR / "models" / "bc_model"
 LOG_DIR = ROOT_DIR / "logs" 
+
+logger = logging.getLogger(__name__)
 
 @hydra.main(version_base=None, config_path="../../config", config_name="train_base_policy")
 def main(cfg: DictConfig):
@@ -91,8 +94,9 @@ def main(cfg: DictConfig):
         n_episodes=int(cfg.training.eval_episodes),
         seed_offset=int(cfg.training.eval_seed),
     )
-    print(metrics)
+    logger.info(metrics)
     env.close()
+    wb_run.finish()
 
 
 if __name__ == "__main__":

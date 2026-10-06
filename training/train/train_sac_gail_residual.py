@@ -15,9 +15,11 @@ import wandb
 from gymnasium.vector import AutoresetMode
 from omegaconf import DictConfig, OmegaConf
 from training.common.rl_utils import make_env, set_seed
+from training.common.train_utils import ResidualGAILTrainer
+from training.policy.sac_policy import SACPolicy
 from training.policy.discriminator_policy import Discriminator
 from training.policy.diffusion_policy import DiffusionPolicy
-from training.policy.sac_policy import SACPolicy
+
 
 OmegaConf.register_new_resolver("eval", eval, replace=True)
 
@@ -85,7 +87,7 @@ def main(cfg: DictConfig):
     generator = hydra.utils.instantiate(cfg.buffers.generator, buffer_r=replay)
 
     # 训练器创建
-    trainer = hydra.utils.instantiate(
+    trainer: ResidualGAILTrainer = hydra.utils.instantiate(
         cfg.trainer,
         env=env,
         eval_env=eval_env,

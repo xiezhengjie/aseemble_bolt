@@ -24,6 +24,7 @@ class Discriminator(BasePolicy):
         self.disc = DiscriminatorNN(state_dim, action_dim, hidden_dim).to(self.device)
         self.disc_optim = torch.optim.AdamW(self.disc.parameters(), lr=lr, eps=1e-5)
 
+
     def _as_2d(self, x):
         t = torch.as_tensor(np.asarray(x), dtype=torch.float32)
         if t.dim() == 1:  t = t.unsqueeze(0)

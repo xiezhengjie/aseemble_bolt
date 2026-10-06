@@ -2,11 +2,11 @@ training:
   seed: 42
   split_seed: 42
   split: 0.8
-  epochs: 10
-  patience: 50
-  eval_episodes: 30
+  epochs: 100
+  patience: 20
+  eval_episodes: 20
   eval_seed: 42
-  batch_size: 512
+  batch_size: 128
   num_workers: 0
 
 policy:
@@ -17,11 +17,14 @@ policy:
   action_dim: 6
   n_action_steps: 8 
   n_obs_steps: 2
-  num_inference_steps: 100
+  num_inference_steps: 10
   warmstart_timestep: 50
   eta: 0.0
-  lr: 1e-3
-  weight_decay: 0.0
+
+  lr: 3e-4
+  betas: [0.9, 0.999]
+  eps: 1e-5
+  weight_decay: 1e-6
 
   model:
     # _target_: training.model.base.conditional_unet1d.ConditionalUnet1D

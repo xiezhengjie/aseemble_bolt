@@ -72,6 +72,8 @@ def main(cfg: DictConfig):
         save_model_dir=MODE_DIR,
     )
 
+
+
     # 训练
     try:
         trainer.train()

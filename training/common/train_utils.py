@@ -221,8 +221,7 @@ class SupervisedPolicyTrainer:
                     if self.patience > 0 and patience_count >= self.patience and self.is_early_stop:
                         break
         finally:
-            if self.wb_run is not None:
-                self.wb_run.finish()
+            pass
         return best_val
 
 

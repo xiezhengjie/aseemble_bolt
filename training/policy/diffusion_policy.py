@@ -25,6 +25,8 @@ class DiffusionPolicy(BasePolicy):
         warmstart_timestep=50,
         eta=0.0,
         lr=1e-4,
+        betas=(0.9, 0.999),
+        eps=1e-8,
         weight_decay=0.0,
         **kwargs,
     ):
@@ -34,8 +36,6 @@ class DiffusionPolicy(BasePolicy):
         self.noise_scheduler = noise_scheduler
         self.inference_noise_scheduler = DDIMScheduler.from_config(noise_scheduler.config)
         self.warmstart_timestep = int(warmstart_timestep)
-        if not 0 <= self.warmstart_timestep < noise_scheduler.config.num_train_timesteps:
-            raise ValueError("warmstart_timestep 必须位于训练扩散 timestep 范围内")
         self.eta = float(eta)
         self.register_buffer('prev_naction', None, persistent=False)
 
@@ -45,12 +45,12 @@ class DiffusionPolicy(BasePolicy):
         self.n_action_steps = n_action_steps
         self.n_obs_steps = n_obs_steps
         self.kwargs = kwargs
-        if min(horizon, n_obs_steps, n_action_steps) < 1 or n_action_steps > horizon:
-            raise ValueError("horizon 必须覆盖观测偏移和整个 action chunk")
 
         self.optimizer = torch.optim.AdamW(
             self.model.parameters(),
             lr=lr,
+            betas=betas,
+            eps=eps,
             weight_decay=weight_decay,
         )
 
