@@ -12,8 +12,8 @@ class  Evaluator:
         done = False
         obs, _ = env.reset(seed=seed)
         while not done:
-            action = self.agent.take_action(obs)
-            _, _, terminated, truncated, info = env.step(action)
+            action = self.agent.predict_action(obs, deterministic=True)
+            obs, _, terminated, truncated, info = env.step(action)
             done = bool(terminated or truncated)
             force = np.asarray(info.get("force", ()), dtype=np.float32).reshape(-1)
             ep_peak_force = max(ep_peak_force, float(np.linalg.norm(force[:6])))
@@ -107,7 +107,7 @@ class ResidualEvaluator(BaseChunkPolicyEvaluator):
                 obs_tensor = torch.from_numpy(obs_window).unsqueeze(0)
                 action_plan = self.agent.sample(obs_tensor, self.sampling_steps)[0].cpu().numpy()
                 plan_index = 0
-            residual_action = self.residual_agent.take_action(obs)
+            residual_action = self.residual_agent.predict_action(obs, deterministic=True)
             action = np.clip(action_plan[plan_index] + self.residual_scale * residual_action,
                              env.action_space.low, env.action_space.high)
             plan_index += 1

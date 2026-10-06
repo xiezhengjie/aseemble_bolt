@@ -4,7 +4,7 @@ env:
 
 trainer:
   _target_: training.common.train_utils.GAILTrainer
-  seed: 1
+  seed: 42
   total_timesteps: 500000
   learning_starts: 1000
   batch_size: 256

@@ -311,6 +311,52 @@ class EvaluationSeedTest(unittest.TestCase):
 
 
 class TrainingEntrypointEvaluationTest(unittest.TestCase):
+    def test_all_configs_use_the_same_final_evaluation_conditions(self):
+        from omegaconf import OmegaConf
+
+        root = Path(__file__).resolve().parents[2]
+        conditions = []
+        for name in ("train_base_policy", "train_sac", "train_sac_gail", "train_sac_gail_residual"):
+            cfg = OmegaConf.load(root / "config" / f"{name}.yaml")
+            episodes = (cfg.training.eval_episodes if name == "train_base_policy"
+                        else cfg.trainer.final_eval_episodes)
+            conditions.append((int(cfg.training.seed), int(cfg.training.eval_seed),
+                               int(cfg.training.eval_env_seed), int(episodes)))
+        self.assertTrue(all(condition == conditions[0] for condition in conditions))
+        self.assertNotEqual(conditions[0][1], conditions[0][2])
+
+    def test_base_entrypoint_separates_global_and_environment_evaluation_seeds(self):
+        from omegaconf import OmegaConf
+
+        module = importlib.import_module("training.train.train_base_policy")
+        root = Path(__file__).resolve().parents[2]
+        cfg = OmegaConf.load(root / "config" / "train_base_policy.yaml")
+        cfg.logging.name = "test"
+        manager, train_loader, val_loader, policy, trainer, env, evaluator, run = (
+            Mock() for _ in range(8))
+        manager.trans_dataloader.return_value = (train_loader, val_loader)
+        train_loader.dataset.sampler.replay_buffer = {'obs': np.zeros((2, 10))}
+        train_loader.dataset.sampler.indices = [(0, 2, 0, 2)]
+        policy.to.return_value = policy
+        with patch.object(module, "ExpertDataManager", return_value=manager), \
+                patch.object(module.hydra.utils, "instantiate", return_value=policy), \
+                patch.object(module, "SupervisedPolicyTrainer", return_value=trainer), \
+                patch.object(module, "AssembleMuJoCoEnv", return_value=env), \
+                patch.object(module, "EpisodeStatsWrapper", side_effect=lambda value: value), \
+                patch.object(module, "BaseChunkPolicyEvaluator", return_value=evaluator), \
+                patch.object(module.wandb, "init", return_value=run), \
+                patch.object(module.torch.cuda, "is_available", return_value=False), \
+                patch.object(module, "set_seed") as seed:
+            module.main.__wrapped__(cfg)
+        seed.assert_has_calls([call(int(cfg.training.seed)), call(int(cfg.training.eval_seed))])
+        self.assertEqual(seed.call_count, 2)
+        evaluator.evaluate.assert_called_once_with(
+            env, n_episodes=int(cfg.training.eval_episodes),
+            seed_offset=int(cfg.training.eval_env_seed))
+        trainer.train.assert_called_once_with()
+        env.close.assert_called_once_with()
+        run.finish.assert_called_once_with()
+
     def test_final_evaluation_and_cleanup_in_each_entrypoint(self):
         from omegaconf import OmegaConf
 
@@ -322,6 +368,9 @@ class TrainingEntrypointEvaluationTest(unittest.TestCase):
             for save_model, fails in ((True, False), (False, False), (True, True)):
                 with self.subTest(entrypoint=name, save_model=save_model, fails=fails):
                     env, eval_env, agent, trainer, run = (Mock() for _ in range(5))
+                    base_policy, disc = Mock(), Mock()
+                    base_policy.to.return_value = base_policy
+                    disc.to.return_value = disc
                     env.single_observation_space.shape = (10,)
                     env.single_action_space.shape = (6,)
                     env.single_action_space.dtype = np.dtype("float32")
@@ -342,6 +391,10 @@ class TrainingEntrypointEvaluationTest(unittest.TestCase):
                         if config is cfg.policy:
                             agent.to.return_value = agent
                             return agent
+                        if name == "train_sac_gail_residual" and config is cfg.base_policy:
+                            return base_policy
+                        if name != "train_sac" and config is cfg.discriminator:
+                            return disc
                         return Mock()
 
                     with patch.object(module.gym.vector, "AsyncVectorEnv", return_value=env), \
@@ -368,11 +421,40 @@ class TrainingEntrypointEvaluationTest(unittest.TestCase):
                         else:
                             agent.load_model.assert_not_called()
                         expected.append(call.evaluate(eval_env, n_episodes=3,
-                                                      seed_offset=int(cfg.training.eval_seed)))
+                                                      seed_offset=int(cfg.training.eval_env_seed)))
                         events.assert_has_calls(expected)
                     env.close.assert_called_once_with()
                     eval_env.close.assert_called_once_with()
                     run.finish.assert_called_once_with()
+                    if name == "train_sac_gail_residual":
+                        base_policy.load_model.assert_called_once_with(module.BASE_POLICY_DIR)
+                        base_policy.requires_grad_.assert_called_once_with(False)
+                        base_policy.eval.assert_called_once_with()
+                        agent.set_obs_normalizer.assert_called_once_with(base_policy.obs_normalizer)
+                        disc.set_obs_normalizer.assert_called_once_with(base_policy.obs_normalizer)
+
+    def test_residual_entrypoint_rejects_missing_stats_before_creating_resources(self):
+        from omegaconf import OmegaConf
+
+        module = importlib.import_module("training.train.train_sac_gail_residual")
+        root = Path(__file__).resolve().parents[2]
+        cfg = OmegaConf.load(root / "config" / "train_sac_gail_residual.yaml")
+        base_policy = Mock()
+        base_policy.to.return_value = base_policy
+        base_policy.obs_normalizer = None
+        with patch.object(module.hydra.utils, "instantiate", return_value=base_policy) as instantiate, \
+                patch.object(module.wandb, "init") as init_run, \
+                patch.object(module.gym.vector, "AsyncVectorEnv") as vector_env, \
+                patch.object(module, "make_env") as make_env, \
+                patch.object(module.torch.cuda, "is_available", return_value=False), \
+                patch.object(module, "set_seed"):
+            with self.assertRaisesRegex(ValueError, "缺少观测归一化统计量"):
+                module.main.__wrapped__(cfg)
+        instantiate.assert_called_once_with(cfg.base_policy)
+        base_policy.load_model.assert_called_once_with(module.BASE_POLICY_DIR)
+        init_run.assert_not_called()
+        vector_env.assert_not_called()
+        make_env.assert_not_called()
 
 
 if __name__ == "__main__":

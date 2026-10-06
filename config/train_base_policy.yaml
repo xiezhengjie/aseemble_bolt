@@ -4,8 +4,9 @@ training:
   split: 0.8
   epochs: 200
   patience: 30
-  eval_episodes: 50
-  eval_seed: 42
+  eval_episodes: 30
+  eval_seed: 200000
+  eval_env_seed: 100000
   batch_size: 128
   num_workers: 0
 
@@ -50,7 +51,7 @@ name: base_policy_diffusion
 
 logging:
   project: diffusion_policy_debug
-  resume: False
+  resume: false
   mode: online
   name: ${now:%Y.%m.%d-%H.%M.%S}_${name}
   tags: ["base_policy", "diffusion_policy"]

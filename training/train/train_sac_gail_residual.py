@@ -39,6 +39,17 @@ def main(cfg: DictConfig):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Using device: {device}")
 
+    # 基座的预处理与权重共同冻结，不能用在线数据重新拟合。
+    base_policy: DiffusionPolicy = hydra.utils.instantiate(cfg.base_policy).to(device)
+    base_policy.load_model(BASE_POLICY_DIR)
+    if base_policy.obs_normalizer is None:
+        raise ValueError(
+            f"基座模型缺少观测归一化统计量：{BASE_POLICY_DIR}。"
+            "请使用 train_base_policy 保存的权重与 obs_normalizer 配套 checkpoint。"
+        )
+    base_policy.requires_grad_(False)
+    base_policy.eval()
+
     # 策略日志配置
     wb_run: wandb.Run = wandb.init(
         dir=LOG_DIR,
@@ -60,10 +71,6 @@ def main(cfg: DictConfig):
     state_dim = int(env.single_observation_space.shape[0])
     action_dim = int(env.single_action_space.shape[0])
 
-    # 基座策略（冻结，仅加载权重）
-    base_policy: DiffusionPolicy = hydra.utils.instantiate(cfg.base_policy).to(device)
-    base_policy.load_model(BASE_POLICY_DIR)
-
     # 残差策略与判别器创建
     residual_space = gym.spaces.Box(
         low=-1.0, high=1.0, shape=(action_dim,), dtype=env.single_action_space.dtype,
@@ -79,6 +86,9 @@ def main(cfg: DictConfig):
         state_dim=state_dim,
         action_dim=action_dim,
     ).to(device)
+
+    agent.set_obs_normalizer(base_policy.obs_normalizer)
+    disc.set_obs_normalizer(base_policy.obs_normalizer)
 
     # 数据缓冲区构建
     expert_manager = hydra.utils.instantiate(cfg.buffers.expert)
@@ -114,7 +124,7 @@ def main(cfg: DictConfig):
         metrics = trainer.evaluator.evaluate(
             eval_env,
             n_episodes=trainer.final_eval_episodes,
-            seed_offset=eval_seed,
+            seed_offset=int(cfg.training.eval_env_seed),
         )
         trainer.record_final_evaluation(metrics)
     finally:

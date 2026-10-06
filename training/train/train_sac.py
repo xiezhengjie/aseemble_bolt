@@ -87,7 +87,7 @@ def main(cfg: DictConfig):
         metrics = trainer.evaluator.evaluate(
             eval_env,
             n_episodes=trainer.final_eval_episodes,
-            seed_offset=eval_seed,
+            seed_offset=int(cfg.training.eval_env_seed),
         )
         trainer.record_final_evaluation(metrics)
     finally:

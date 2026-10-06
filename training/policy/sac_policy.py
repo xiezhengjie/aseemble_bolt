@@ -100,6 +100,7 @@ class SACPolicy(BasePolicy):
         if base_only:
             raise ValueError("普通 SACAgent 不支持 base_only")
         states, return_single = self._obs_to_batch(state)
+        states = self.normalize_obs(states)
         self.actor.eval()
         with torch.no_grad():
             executed, _ = self.actor(states, deterministic=deterministic)
@@ -111,6 +112,7 @@ class SACPolicy(BasePolicy):
 
     def calc_target(self, rewards, next_states, dones):
         """ 计算目标Q值 """
+        next_states = self.normalize_obs(next_states)
         with torch.no_grad():
             next_actions, next_log_prob = self.actor(next_states)
             q1_value = self.target_critic_1(next_states, next_actions)
@@ -138,10 +140,10 @@ class SACPolicy(BasePolicy):
                 t = t.to(self.device)
             return t.view(-1, 1) if extra_view else t
 
-        states = _to_dev(transition_dict['states'])
+        states = self.normalize_obs(_to_dev(transition_dict['states']))
         actions = _to_dev(transition_dict['actions'])
         rewards = _to_dev(transition_dict['rewards'], extra_view=True)
-        next_states = _to_dev(transition_dict['next_states'])
+        next_states = self.normalize_obs(_to_dev(transition_dict['next_states']))
         dones = _to_dev(transition_dict['dones'], extra_view=True)
 
         # SB3 SAC.train：每个梯度步 reset_noise()（默认 batch=1，整 minibatch 共用一份 E）。
@@ -226,6 +228,7 @@ class SACPolicy(BasePolicy):
     def load_policy(self, model_dir):
         _model_dir = Path(model_dir)
         self.actor.load_state_dict(load_state_dict(_model_dir, "policy_net", map_location=self.device))
+        self._load_obs_normalizer(_model_dir)
 
     def load_model(self, model_dir):
         _model_dir = Path(model_dir)
@@ -239,6 +242,7 @@ class SACPolicy(BasePolicy):
         _model_dir = Path(model_dir)
         _model_dir.mkdir(parents=True, exist_ok=True)
         save_state_dict(self.actor.state_dict(), _model_dir, "policy_net")
+        self._save_obs_normalizer(_model_dir)
         save_state_dict(self.critic_1.state_dict(), _model_dir, "qvalue_net1")
         save_state_dict(self.critic_2.state_dict(), _model_dir, "qvalue_net2")
         cfg = self.actor.export_cfg()

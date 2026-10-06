@@ -6,7 +6,7 @@ env:
 # training / policy / buffers 等通过 ${trainer.xxx} 或 ${training.xxx} 引用，避免重复写值。
 trainer:
   _target_: training.common.train_utils.OffPolicyTrainer
-  seed: 1
+  seed: 42
   total_timesteps: 50000
   learning_starts: 1000
   batch_size: 64

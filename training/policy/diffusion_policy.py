@@ -8,7 +8,7 @@ from diffusers.schedulers.scheduling_ddpm import DDPMScheduler
 from diffusers.schedulers.scheduling_ddim import DDIMScheduler
 from training.policy.base_policy import BasePolicy
 from training.model.base.conditional_unet1d import ConditionalUnet1D
-from training.common.checkpoint import has_weight, load_state_dict, save_state_dict
+from training.common.checkpoint import load_state_dict, save_state_dict
 from training.common.rl_utils import RunningMeanStd
 
 
@@ -126,8 +126,7 @@ class DiffusionPolicy(BasePolicy):
         assert 'past_action' not in obs_dict, "past_action 作为条件尚未实现"
 
         obs = obs_dict["obs"].to(device=self.device, dtype=self.dtype)
-        if self.obs_normalizer is not None:
-            obs = self.obs_normalizer.normalize(obs)
+        obs = self.normalize_obs(obs)
         batch_size, obs_steps, obs_dim = obs.shape
 
         global_cond = obs[:, :self.n_obs_steps].reshape(batch_size, -1)
@@ -172,8 +171,7 @@ class DiffusionPolicy(BasePolicy):
 
         obs = batch['obs']          # (B, To, obs_dim)
         action = batch['action']    # (B, Ta, action_dim)
-        if self.obs_normalizer is not None:
-            obs = self.obs_normalizer.normalize(obs)
+        obs = self.normalize_obs(obs)
 
         global_cond = None
         trajectory = action
@@ -265,22 +263,9 @@ class DiffusionPolicy(BasePolicy):
         self.model.load_state_dict(load_state_dict(
             Path(model_dir), "policy_net", map_location=self.device,
         ))
-        self.obs_normalizer = None
-        if has_weight(model_dir, "obs_normalizer"):
-            state = load_state_dict(model_dir, "obs_normalizer", map_location="cpu")
-            if state is not None:
-                self.obs_normalizer = RunningMeanStd(
-                    (self.obs_dim,), epsilon=state['epsilon'], clip=state['clip'],
-                )
-                self.obs_normalizer.load_state_dict(state)
+        self._load_obs_normalizer(model_dir)
         self.reset()
 
     def save_model(self, model_dir):
         save_state_dict(self.model.state_dict(), model_dir, "policy_net")
-        normalizer = self.obs_normalizer
-        state = None if normalizer is None else {
-            **normalizer.state_dict(),
-            'epsilon': normalizer.epsilon,
-            'clip': normalizer.clip,
-        }
-        save_state_dict(state, model_dir, "obs_normalizer")
+        self._save_obs_normalizer(model_dir)

@@ -17,6 +17,7 @@ class Discriminator(BasePolicy):
         if not math.isfinite(ent_reg_scale) or ent_reg_scale < 0.0:
             raise ValueError("ent_reg_scale must be a finite non-negative number")
 
+        self.state_dim = int(state_dim)
         self.smoothing = smoothing
         self.lr = lr
         self.grad_clip_norm = grad_clip_norm
@@ -31,9 +32,12 @@ class Discriminator(BasePolicy):
         elif t.dim() > 2: t = t.reshape(t.shape[0], -1)
         return t.to(self.device)
 
+    def _states_to_batch(self, states):
+        return self.normalize_obs(self._as_2d(states))
+
     def update(self,expert_states, expert_actions, gen_states, gen_actions,  log_info=True):
-        expert_d = self.disc(self._as_2d(expert_states), self._as_2d(expert_actions))
-        policy_d = self.disc(self._as_2d(gen_states), self._as_2d(gen_actions))
+        expert_d = self.disc(self._states_to_batch(expert_states), self._as_2d(expert_actions))
+        policy_d = self.disc(self._states_to_batch(gen_states), self._as_2d(gen_actions))
 
         # 计算专家数据和生成数据的损失
         expert_loss = F.binary_cross_entropy_with_logits(expert_d, torch.full_like(expert_d, self.smoothing))
@@ -72,7 +76,7 @@ class Discriminator(BasePolicy):
     def predict_policy_prob(self, states, actions, to_numpy=True):
         """D = P(policy|s,a) = sigmoid(ℓ)，与 expert_value / policy_value 同一尺度。"""
         with torch.no_grad():
-            logit = self.disc(self._as_2d(states), self._as_2d(actions)).squeeze(-1)
+            logit = self.disc(self._states_to_batch(states), self._as_2d(actions)).squeeze(-1)
             d = torch.sigmoid(logit)
             if to_numpy:
                 return d.cpu().numpy()
@@ -81,7 +85,7 @@ class Discriminator(BasePolicy):
     def predict_rewards(self, states, actions, to_numpy=True):
         """ r̃ = softplus(−z) """
         with torch.no_grad():
-            logit = self.disc(self._as_2d(states), self._as_2d(actions)).squeeze(-1)
+            logit = self.disc(self._states_to_batch(states), self._as_2d(actions)).squeeze(-1)
             z = torch.clamp(logit, -DISC_LOGIT_CLAMP, DISC_LOGIT_CLAMP)  # logit_clamp ∈ [0,1]（clamp=20）
             reward = F.softplus(-z) 
         if to_numpy:
@@ -96,9 +100,13 @@ class Discriminator(BasePolicy):
     def load_model(self, model_dir):
         _model_dir = Path(model_dir)
         _model_dir.mkdir(parents=True, exist_ok=True)
-        self.disc.load_state_dict(torch.load(_model_dir/"discriminator_net.pt", weights_only=True))
+        self.disc.load_state_dict(torch.load(
+            _model_dir/"discriminator_net.pt", map_location=self.device, weights_only=True,
+        ))
+        self._load_obs_normalizer(_model_dir)
 
     def save_model(self, model_dir):
         _model_dir = Path(model_dir)
         _model_dir.mkdir(parents=True, exist_ok=True)
         torch.save(self.disc.state_dict(), _model_dir/"discriminator_net.pt")
+        self._save_obs_normalizer(_model_dir)
