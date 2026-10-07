@@ -229,6 +229,7 @@ class OffPolicyTrainer:
     - eval_env 必须是独立单环境
     - replay.sample 返回 SAC batch 字典
     - learning_starts 按 transition 数计（包含预热）
+    - use_warmup=True 时前 learning_starts 步采集预热动作（随机 / 纯基座），期间不做更新
     - gradient_step 累计策略梯度更新数，控制 Target 更新间隔
     - 学习率由各策略内部的 lr_scheduler 按 num_training_steps 调度
     """
@@ -241,7 +242,7 @@ class OffPolicyTrainer:
         seed=1, eval_interval=5000, eval_episodes=10, final_eval_episodes=30,
         save_model_dir="models", is_save_model=True, 
         is_draw=True, log_interval=100, wb_run=None,
-        policy_warmup=False, reset_options=None, policy_updates=1,
+        use_warmup=True, reset_options=None, policy_updates=1,
         target_update_interval=1,
     ):
         self.env = env
@@ -260,7 +261,7 @@ class OffPolicyTrainer:
         self.log_interval = int(log_interval)
         self.is_save_model = is_save_model
         self.save_model_dir = Path(save_model_dir)
-        self.policy_warmup = policy_warmup
+        self.use_warmup = use_warmup
         self.reset_options = reset_options
 
         self.collector = collector or self.collector_class(env, agent, replay_buffer)
@@ -294,7 +295,7 @@ class OffPolicyTrainer:
             self.collector.reset(self.seed, options=self.reset_options)
             with tqdm(total=self.total_timesteps, desc=type(self).__name__, dynamic_ncols=True, ascii=True, mininterval=0.5) as bar:
                 while self.global_step < self.total_timesteps:
-                    warmup = self.global_step < self.learning_starts and not self.policy_warmup 
+                    warmup = self.global_step < self.learning_starts and self.use_warmup
                     episodes = self.collector.step(warmup=warmup)
                     self.global_step += self.env.num_envs
 
@@ -491,7 +492,7 @@ class ResidualGAILTrainer(GAILTrainer):
         self, env, eval_env, base_agent, res_agent, replay_buffer,
         total_timesteps, learning_starts=1000, batch_size=256, *,
         residual_scale, obs_horizon, action_interval, sampling_steps,
-        evaluator=None, **kwargs,
+        use_warmup=False, evaluator=None, **kwargs,
     ):
 
         collector = self.collector_class(
@@ -507,7 +508,8 @@ class ResidualGAILTrainer(GAILTrainer):
         super().__init__(
             env, eval_env, res_agent, replay_buffer, total_timesteps,
             learning_starts, batch_size,
-            collector=collector, evaluator=evaluator, policy_warmup=True, **kwargs,
+            collector=collector, evaluator=evaluator,
+            use_warmup=use_warmup, **kwargs,
         )
 
     def _discriminator_states(self, states: np.ndarray) -> np.ndarray:

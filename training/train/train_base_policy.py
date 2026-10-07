@@ -9,10 +9,10 @@ sys.path.insert(0, str(ROOT_DIR))
 os.environ.setdefault("CUBLAS_WORKSPACE_CONFIG", ":4096:8")
 
 import hydra
-import numpy as np
 import torch
 import wandb
 import logging
+import numpy as np
 from omegaconf import DictConfig, OmegaConf
 from training.common.buffer_utils import ExpertDataManager
 from training.common.eval_utils import BaseChunkPolicyEvaluator

@@ -6,22 +6,23 @@ trainer:
   _target_: training.common.train_utils.ResidualGAILTrainer
   seed: 42
   total_timesteps: 500000
-  learning_starts: 0
-  batch_size: 256
+  learning_starts: 5000     # 前 5000 步只用基座动作采集（基座预热），期间不做更新
+  use_warmup: true          # 启用基座预热阶段；false 表示残差策略从第 0 步直接参与
+  batch_size: 128
   policy_updates: 1
   target_update_interval: 2
-  eval_interval: 5000
+  eval_interval: 10000
   eval_episodes: 10
   final_eval_episodes: 30
   log_interval: 100
 
   disc_updates: 2
-  disc_batch_size: 256
+  disc_batch_size: 64
   
-  env_reward_weight: 0.3
+  env_reward_weight: 0
   gail_reward_coef: 1.0
   success_reward: 100.0
-  residual_scale: 0.05
+  residual_scale: 0.1
   obs_horizon: ${base_policy.n_obs_steps}
   action_interval: ${base_policy.n_action_steps}
   sampling_steps: ${base_policy.num_inference_steps}
@@ -98,7 +99,7 @@ policy:
 
   lr_scheduler:
     name: cosine
-    num_warmup_steps: 0
+    num_warmup_steps: 5
 
   gamma: 0.99
   tau: 0.005
