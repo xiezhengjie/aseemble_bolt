@@ -46,8 +46,8 @@ policy:
       weight_decay: 0.0
 
   lr_scheduler:
-    name: cosine
-    num_warmup_steps: 1000
+    name: constant
+    num_warmup_steps: 0
 
   gamma: 0.99
   tau: 0.005

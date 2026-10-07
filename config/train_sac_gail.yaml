@@ -50,8 +50,8 @@ policy:
       weight_decay: 0.0
 
   lr_scheduler:
-    name: cosine
-    num_warmup_steps: 1000
+    name: constant
+    num_warmup_steps: 0
 
   gamma: 0.99
   tau: 0.005
@@ -74,7 +74,7 @@ discriminator:
 
   lr_scheduler:
     name: cosine
-    num_warmup_steps: 1000
+    num_warmup_steps: 100000
 
   smoothing: 0.05
   ent_reg_scale: 0.001
