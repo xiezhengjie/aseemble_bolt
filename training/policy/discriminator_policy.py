@@ -2,14 +2,17 @@ import math
 import torch
 import numpy as np
 import torch.nn.functional as F 
+from typing import Dict
 from pathlib import Path
+from diffusers.optimization import get_scheduler
 from training.model.gail.discriminator import DiscriminatorNN   
 from training.policy.base_policy import BasePolicy
 
 DISC_LOGIT_CLAMP = 20.0  # z clamp ±20 → softplus(−z)∈[≈0,20]；对外 r̃/20 ∈[0,1]
 
 class Discriminator(BasePolicy):
-    def __init__(self, state_dim, action_dim, hidden_dim, lr,
+    def __init__(self, state_dim, action_dim, hidden_dim,
+                 optimizer: Dict, lr_scheduler: Dict, num_training_steps: int,
                  smoothing=0.1, grad_clip_norm=None,
                  ent_reg_scale=0.001):
         super().__init__()
@@ -19,11 +22,22 @@ class Discriminator(BasePolicy):
 
         self.state_dim = int(state_dim)
         self.smoothing = smoothing
-        self.lr = lr
         self.grad_clip_norm = grad_clip_norm
         self.ent_reg_scale = ent_reg_scale
         self.disc = DiscriminatorNN(state_dim, action_dim, hidden_dim).to(self.device)
-        self.disc_optim = torch.optim.AdamW(self.disc.parameters(), lr=lr, eps=1e-5)
+        self.disc_optim = torch.optim.AdamW(
+            self.disc.parameters(),
+            lr=optimizer['lr'],
+            betas=optimizer['betas'],
+            eps=optimizer['eps'],
+            weight_decay=optimizer['weight_decay'],
+        )
+        self.lr_scheduler = get_scheduler(
+            lr_scheduler['name'],
+            optimizer=self.disc_optim,
+            num_warmup_steps=lr_scheduler['num_warmup_steps'],
+            num_training_steps=num_training_steps,
+        )
 
 
     def _as_2d(self, x):
@@ -58,6 +72,7 @@ class Discriminator(BasePolicy):
         else:
             gn = None
         self.disc_optim.step()
+        self.lr_scheduler.step()
 
         if log_info:
             return {
@@ -91,11 +106,6 @@ class Discriminator(BasePolicy):
         if to_numpy:
             return reward.cpu().numpy()
         return reward
-
-    def set_lr_scale(self, scale):
-        """按初始学习率设置倍率；衰减进度由 trainer 计算。"""
-        for p in self.disc_optim.param_groups:
-            p['lr'] = self.lr * scale
 
     def load_model(self, model_dir):
         _model_dir = Path(model_dir)

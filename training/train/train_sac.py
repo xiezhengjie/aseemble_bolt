@@ -1,5 +1,6 @@
 """Hydra 配置的连续动作 SAC 训练入口。"""
 
+import math
 import os
 import sys
 from pathlib import Path
@@ -55,11 +56,17 @@ def main(cfg: DictConfig):
     # 策略创建
     state_dim = int(env.single_observation_space.shape[0])
     action_dim = int(env.single_action_space.shape[0])
+    # 梯度更新次数与 OffPolicyTrainer.train 的更新条件（global_step > learning_starts）一致
+    num_training_steps = (
+        math.ceil(int(cfg.trainer.total_timesteps) / n_envs)
+        - int(cfg.trainer.learning_starts) // n_envs
+    ) * int(cfg.trainer.policy_updates)
     agent: SACPolicy = hydra.utils.instantiate(
         cfg.policy,
         state_dim=state_dim,
         action_dim=action_dim,
         action_space=env.single_action_space,
+        num_training_steps=num_training_steps,
     ).to(device)
 
     # 训练器创建
@@ -72,8 +79,6 @@ def main(cfg: DictConfig):
         wb_run=wb_run,
         save_model_dir=MODE_DIR,
     )
-
-
 
     # 训练
     try:

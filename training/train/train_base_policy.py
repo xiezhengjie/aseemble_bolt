@@ -60,15 +60,8 @@ def main(cfg: DictConfig):
     )
 
     # 策略创建
-    policy: DiffusionPolicy =  hydra.utils.instantiate(cfg.policy).to(device)
-    sampler = train_loader.dataset.sampler
-    data = sampler.replay_buffer
-    train_frames = np.zeros(len(data['obs']), dtype=bool)
-    for start, end, _, _ in sampler.indices:
-        train_frames[start:end] = True
-    if not train_frames.any():
-        raise ValueError("训练集没有可用于拟合归一化统计量的帧")
-    policy.fit_obs_normalizer(data['obs'][train_frames])
+    num_training_steps = len(train_loader)*int(cfg.training.epochs)
+    policy: DiffusionPolicy =  hydra.utils.instantiate(cfg.policy, num_training_steps=num_training_steps).to(device)
 
     # 训练
     trainer = SupervisedPolicyTrainer(

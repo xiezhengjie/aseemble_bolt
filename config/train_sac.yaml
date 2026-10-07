@@ -12,7 +12,6 @@ trainer:
   batch_size: 64
   policy_updates: 1
   target_update_interval: 1
-  policy_lr_min_ratio: 0.3
   eval_interval: 5000
   eval_episodes: 10
   final_eval_episodes: 30
@@ -28,9 +27,28 @@ training:
 policy:
   _target_: training.policy.sac_policy.SACPolicy
   hidden_dim: [256, 256]
-  actor_lr: 3e-4
-  critic_lr: 3e-4
-  alpha_lr: 3e-4
+
+  optimizer:
+    actor:
+      lr: 3e-4
+      betas: [0.9, 0.999]
+      eps: 1e-5
+      weight_decay: 0.0
+    critic:
+      lr: 3e-4
+      betas: [0.9, 0.999]
+      eps: 1e-5
+      weight_decay: 0.0
+    alpha:
+      lr: 3e-4
+      betas: [0.9, 0.999]
+      eps: 1e-5
+      weight_decay: 0.0
+
+  lr_scheduler:
+    name: cosine
+    num_warmup_steps: 1000
+
   gamma: 0.99
   tau: 0.005
   alpha: 1.0

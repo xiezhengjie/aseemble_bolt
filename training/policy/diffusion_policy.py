@@ -4,6 +4,7 @@ from typing import Dict
 import torch
 import torch.nn.functional as F
 from einops import reduce
+from diffusers.optimization import get_scheduler
 from diffusers.schedulers.scheduling_ddpm import DDPMScheduler
 from diffusers.schedulers.scheduling_ddim import DDIMScheduler
 from training.policy.base_policy import BasePolicy
@@ -17,6 +18,9 @@ class DiffusionPolicy(BasePolicy):
         self,
         model: ConditionalUnet1D,
         noise_scheduler: DDPMScheduler,
+        optimizer: Dict,
+        lr_scheduler: Dict,
+        num_training_steps: int,
         horizon,
         obs_dim,
         action_dim,
@@ -25,10 +29,6 @@ class DiffusionPolicy(BasePolicy):
         num_inference_steps=None,
         warmstart_timestep=50,
         eta=0.0,
-        lr=1e-4,
-        betas=(0.9, 0.999),
-        eps=1e-8,
-        weight_decay=0.0,
         **kwargs,
     ):
         super().__init__()
@@ -50,10 +50,17 @@ class DiffusionPolicy(BasePolicy):
 
         self.optimizer = torch.optim.AdamW(
             self.model.parameters(),
-            lr=lr,
-            betas=betas,
-            eps=eps,
-            weight_decay=weight_decay,
+            lr=optimizer['lr'],
+            betas=optimizer['betas'],
+            eps=optimizer['eps'],
+            weight_decay=optimizer['weight_decay'],
+        )
+
+        self.lr_scheduler = get_scheduler(
+            lr_scheduler['name'],
+            optimizer=self.optimizer,
+            num_warmup_steps=lr_scheduler['num_warmup_steps'],
+            num_training_steps=num_training_steps,
         )
 
         if num_inference_steps is None:
@@ -216,6 +223,7 @@ class DiffusionPolicy(BasePolicy):
         self.optimizer.zero_grad(set_to_none=True)
         loss.backward()
         self.optimizer.step()
+        self.lr_scheduler.step()
         return loss.detach()
 
     # ── 一轮训练 / 验证 ─────────────────────────────────────────────
@@ -238,8 +246,6 @@ class DiffusionPolicy(BasePolicy):
             n = len(batch['obs'])
             total = total + loss * n
             count += n
-        if count == 0:
-            raise ValueError("训练 DataLoader 没有可用样本")
         return float(total / count)
 
     @torch.no_grad()
@@ -254,8 +260,6 @@ class DiffusionPolicy(BasePolicy):
             n = len(batch['obs'])
             total = total + loss * n
             count += n
-        if count == 0:
-            raise ValueError("验证 DataLoader 没有可用样本")
         return float(total / count)
 
     # ── 存取 ────────────────────────────────────────────────────────

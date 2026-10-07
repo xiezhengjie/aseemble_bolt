@@ -3,7 +3,9 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 
+from typing import Dict
 from pathlib import Path
+from diffusers.optimization import get_scheduler
 from training.model.gail.sac import PolicyNet, QValueNet
 from training.policy.base_policy import BasePolicy
 from training.common.checkpoint import load_state_dict, save_policy_cfg, save_state_dict
@@ -11,7 +13,8 @@ from training.common.checkpoint import load_state_dict, save_policy_cfg, save_st
 class SACPolicy(BasePolicy):
     ''' 处理连续动作的SAC算法 '''
     def __init__(self, state_dim, hidden_dim, action_dim, action_space,
-                 actor_lr, critic_lr, alpha_lr, tau, gamma,
+                 optimizer: Dict, lr_scheduler: Dict, num_training_steps: int,
+                 tau, gamma,
                  alpha=1.0,
                  log_std_init=-3,
                  autotune=True,
@@ -21,9 +24,9 @@ class SACPolicy(BasePolicy):
                  alpha_min: float|None = None,
                  target_entropy: float|None = None):
         """
-        actor_lr: Actor网络学习率, 值太大，策略会剧烈变化，导致训练震荡甚至发散；如果太小，策略收敛极慢，可能陷入局部最优
-        critic_lr: Critic网络学习率, 设置 critic_lr 略大于或等于 actor_lr
-        alpha_lr: 温度学习率
+        optimizer: 各网络优化器超参（actor / critic / alpha），含 lr、betas、eps、weight_decay
+        lr_scheduler: 学习率调度器配置（name、num_warmup_steps）
+        num_training_steps: 总梯度更新次数，供调度器计算学习率曲线
         tau: 软更新因子, tau 通常设得非常小（如 0.005 或 0.001）。这意味着目标网络每步只向当前网络"挪动" 0.5% 或 0.1%，变化极其平滑。这能极大防止 Q 值过高估计和训练震荡
         gamma: 折扣因子
         use_sde: 是否使用 gSDE (generalized State-Dependent Exploration)
@@ -41,10 +44,6 @@ class SACPolicy(BasePolicy):
         self.log_std_init = float(log_std_init)
         self.use_orthogonal_init = bool(use_orthogonal_init)
 
-        self.actor_lr = actor_lr
-        self.critic_lr = critic_lr
-        self.alpha_lr = alpha_lr
-
         self.actor = PolicyNet(state_dim, hidden_dim, action_dim,
                                          action_space, log_std_init=log_std_init,
                                          use_sde=use_sde, use_orthogonal_init=use_orthogonal_init,
@@ -59,8 +58,32 @@ class SACPolicy(BasePolicy):
                                                    hidden_dim, action_dim, use_orthogonal_init).to(self.device)
         self.target_critic_1.load_state_dict(self.critic_1.state_dict())
         self.target_critic_2.load_state_dict(self.critic_2.state_dict())
-        self.actor_optimizer = torch.optim.Adam(self.actor.parameters(), lr=actor_lr, eps=1e-5)
-        self.critic_optimizer = torch.optim.Adam(list(self.critic_1.parameters()) + list(self.critic_2.parameters()), lr=critic_lr, eps=1e-5)
+        self.actor_optimizer = torch.optim.AdamW(
+            self.actor.parameters(),
+            lr=optimizer['actor']['lr'],
+            betas=optimizer['actor']['betas'],
+            eps=optimizer['actor']['eps'],
+            weight_decay=optimizer['actor']['weight_decay'],
+        )
+        self.critic_optimizer = torch.optim.AdamW(
+            list(self.critic_1.parameters()) + list(self.critic_2.parameters()),
+            lr=optimizer['critic']['lr'],
+            betas=optimizer['critic']['betas'],
+            eps=optimizer['critic']['eps'],
+            weight_decay=optimizer['critic']['weight_decay'],
+        )
+        self.actor_lr_scheduler = get_scheduler(
+            lr_scheduler['name'],
+            optimizer=self.actor_optimizer,
+            num_warmup_steps=lr_scheduler['num_warmup_steps'],
+            num_training_steps=num_training_steps,
+        )
+        self.critic_lr_scheduler = get_scheduler(
+            lr_scheduler['name'],
+            optimizer=self.critic_optimizer,
+            num_warmup_steps=lr_scheduler['num_warmup_steps'],
+            num_training_steps=num_training_steps,
+        )
         self.gamma = gamma
         self.tau = tau
         self.autotune = autotune
@@ -73,7 +96,19 @@ class SACPolicy(BasePolicy):
             self.target_entropy = -action_dim if target_entropy is None else float(target_entropy)
             self.log_alpha = self.alpha.detach().log().requires_grad_(True)
             self.alpha = self.log_alpha.exp().item()
-            self.log_alpha_optimizer = torch.optim.Adam([self.log_alpha], lr=alpha_lr, eps=1e-5)
+            self.log_alpha_optimizer = torch.optim.AdamW(
+                [self.log_alpha],
+                lr=optimizer['alpha']['lr'],
+                betas=optimizer['alpha']['betas'],
+                eps=optimizer['alpha']['eps'],
+                weight_decay=optimizer['alpha']['weight_decay'],
+            )
+            self.alpha_lr_scheduler = get_scheduler(
+                lr_scheduler['name'],
+                optimizer=self.log_alpha_optimizer,
+                num_warmup_steps=lr_scheduler['num_warmup_steps'],
+                num_training_steps=num_training_steps,
+            )
             
 
     def reset_noise(self, batch_size=1):
@@ -166,6 +201,7 @@ class SACPolicy(BasePolicy):
             self.log_alpha_optimizer.zero_grad()
             alpha_loss.backward()
             self.log_alpha_optimizer.step()
+            self.alpha_lr_scheduler.step()
             if self.alpha_min is not None:
                 with torch.no_grad():
                     self.log_alpha.clamp_(min=float(np.log(self.alpha_min)))
@@ -191,6 +227,7 @@ class SACPolicy(BasePolicy):
         torch.nn.utils.clip_grad_norm_(
             list(self.critic_1.parameters()) + list(self.critic_2.parameters()), 5.0)
         self.critic_optimizer.step()
+        self.critic_lr_scheduler.step()
 
         q1_pi = self.critic_1(obs, actions_pi)
         q2_pi = self.critic_2(obs, actions_pi)
@@ -200,6 +237,7 @@ class SACPolicy(BasePolicy):
         actor_loss.backward()
         torch.nn.utils.clip_grad_norm_(self.actor.parameters(), 1.0)
         self.actor_optimizer.step()
+        self.actor_lr_scheduler.step()
 
         if log_info:
             if self.autotune:
@@ -215,16 +253,6 @@ class SACPolicy(BasePolicy):
             info["actor_loss"] = actor_loss.item()
         return info
     
-    def set_lr_scale(self, scale):
-        """按初始学习率设置倍率；衰减进度由 trainer 计算。"""
-        for p in self.actor_optimizer.param_groups:
-            p['lr'] = self.actor_lr * scale
-        for p in self.critic_optimizer.param_groups:
-            p['lr'] = self.critic_lr * scale
-        if self.autotune:
-            for p in self.log_alpha_optimizer.param_groups:
-                p['lr'] = self.alpha_lr * scale
-
     def load_policy(self, model_dir):
         _model_dir = Path(model_dir)
         self.actor.load_state_dict(load_state_dict(_model_dir, "policy_net", map_location=self.device))

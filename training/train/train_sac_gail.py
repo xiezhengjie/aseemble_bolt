@@ -1,5 +1,6 @@
 """Hydra 配置的 MuJoCo SAC-GAIL 训练入口。"""
 
+import math
 import os
 import sys
 from pathlib import Path
@@ -57,16 +58,23 @@ def main(cfg: DictConfig):
     action_dim = int(env.single_action_space.shape[0])
 
     # 策略与判别器创建
+    # 梯度更新次数与 OffPolicyTrainer.train 的更新条件（global_step > learning_starts）一致
+    update_steps = (
+        math.ceil(int(cfg.trainer.total_timesteps) / n_envs)
+        - int(cfg.trainer.learning_starts) // n_envs
+    )
     agent: SACPolicy = hydra.utils.instantiate(
         cfg.policy,
         state_dim=state_dim,
         action_dim=action_dim,
         action_space=env.single_action_space,
+        num_training_steps=update_steps * int(cfg.trainer.policy_updates),
     ).to(device)
     disc: Discriminator = hydra.utils.instantiate(
         cfg.discriminator,
         state_dim=state_dim,
         action_dim=action_dim,
+        num_training_steps=update_steps * int(cfg.trainer.disc_updates),
     ).to(device)
 
     # 数据缓冲区构建

@@ -22,10 +22,15 @@ policy:
   warmstart_timestep: 50
   eta: 0.0
 
-  lr: 3e-4
-  betas: [0.9, 0.999]
-  eps: 1e-5
-  weight_decay: 1e-6
+  optimizer:
+    lr: 3e-4
+    betas: [0.9, 0.999]
+    eps: 1e-5
+    weight_decay: 1e-6
+
+  lr_scheduler:
+    name: cosine
+    num_warmup_steps: 1000
 
   model:
     # _target_: training.model.base.conditional_unet1d.ConditionalUnet1D

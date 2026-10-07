@@ -10,8 +10,6 @@ trainer:
   batch_size: 256
   policy_updates: 1
   target_update_interval: 2
-  policy_lr_min_ratio: 0.3
-  disc_lr_min_ratio: 0.1
   eval_interval: 5000
   eval_episodes: 10
   final_eval_episodes: 30
@@ -47,8 +45,18 @@ base_policy:
   num_inference_steps: 100
   warmstart_timestep: 50
   eta: 0.0
-  lr: 1e-3
-  weight_decay: 0.0
+
+  # 基座已冻结，优化器与调度器仅满足构造签名，不参与训练。
+  optimizer:
+    lr: 3e-4
+    betas: [0.9, 0.999]
+    eps: 1e-5
+    weight_decay: 1e-6
+
+  lr_scheduler:
+    name: cosine
+    num_warmup_steps: 1000
+
   model:
     _target_: training.model.base.conditional_unet1d_sample.ConditionalUnet1D
     input_dim: ${base_policy.action_dim}
@@ -70,9 +78,28 @@ base_policy:
 policy:
   _target_: training.policy.sac_policy.SACPolicy
   hidden_dim: [256, 256]
-  actor_lr: 3e-4
-  critic_lr: 3e-4
-  alpha_lr: 1e-4
+
+  optimizer:
+    actor:
+      lr: 3e-4
+      betas: [0.9, 0.999]
+      eps: 1e-5
+      weight_decay: 0.0
+    critic:
+      lr: 3e-4
+      betas: [0.9, 0.999]
+      eps: 1e-5
+      weight_decay: 0.0
+    alpha:
+      lr: 1e-4
+      betas: [0.9, 0.999]
+      eps: 1e-5
+      weight_decay: 0.0
+
+  lr_scheduler:
+    name: cosine
+    num_warmup_steps: 1000
+
   gamma: 0.99
   tau: 0.005
   alpha: 0.2
@@ -85,7 +112,17 @@ policy:
 discriminator:
   _target_: training.policy.discriminator_policy.Discriminator
   hidden_dim: [128, 128]
-  lr: 1e-4
+
+  optimizer:
+    lr: 1e-4
+    betas: [0.9, 0.999]
+    eps: 1e-5
+    weight_decay: 0.01
+
+  lr_scheduler:
+    name: cosine
+    num_warmup_steps: 1000
+
   smoothing: 0.05
   ent_reg_scale: 0.001
   grad_clip_norm: 1.0

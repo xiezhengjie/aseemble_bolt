@@ -1,5 +1,6 @@
 """Hydra 配置的 MuJoCo SAC-GAIL Residual 训练入口。"""
 
+import math
 import os
 import sys
 from pathlib import Path
@@ -40,7 +41,8 @@ def main(cfg: DictConfig):
     print(f"Using device: {device}")
 
     # 基座的预处理与权重共同冻结，不能用在线数据重新拟合。
-    base_policy: DiffusionPolicy = hydra.utils.instantiate(cfg.base_policy).to(device)
+    # 基座不参与更新，优化器与调度器仅满足构造签名，num_training_steps 传 0。
+    base_policy: DiffusionPolicy = hydra.utils.instantiate(cfg.base_policy, num_training_steps=0).to(device)
     base_policy.load_model(BASE_POLICY_DIR)
     if base_policy.obs_normalizer is None:
         raise ValueError(
@@ -75,16 +77,23 @@ def main(cfg: DictConfig):
     residual_space = gym.spaces.Box(
         low=-1.0, high=1.0, shape=(action_dim,), dtype=env.single_action_space.dtype,
     )
+    # 梯度更新次数与 OffPolicyTrainer.train 的更新条件（global_step > learning_starts）一致
+    update_steps = (
+        math.ceil(int(cfg.trainer.total_timesteps) / n_envs)
+        - int(cfg.trainer.learning_starts) // n_envs
+    )
     agent: SACPolicy = hydra.utils.instantiate(
         cfg.policy,
         state_dim=state_dim,
         action_dim=action_dim,
         action_space=residual_space,
+        num_training_steps=update_steps * int(cfg.trainer.policy_updates),
     ).to(device)
     disc: Discriminator = hydra.utils.instantiate(
         cfg.discriminator,
         state_dim=state_dim,
         action_dim=action_dim,
+        num_training_steps=update_steps * int(cfg.trainer.disc_updates),
     ).to(device)
 
     agent.set_obs_normalizer(base_policy.obs_normalizer)

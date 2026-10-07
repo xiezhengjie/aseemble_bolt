@@ -198,11 +198,7 @@ def create_indices(episode_ends, sequence_length, episode_mask,
     """为每个 episode 生成序列窗口索引。"""
     episode_ends = np.asarray(episode_ends)
     episode_mask = np.asarray(episode_mask, dtype=bool)
-    if episode_ends.shape != episode_mask.shape:
-        raise ValueError("episode_mask 与 episode_ends 的 shape 必须一致")
     sequence_length = int(sequence_length)
-    if sequence_length < 1:
-        raise ValueError("sequence_length 必须为正数")
     pad_before = min(max(int(pad_before), 0), sequence_length - 1)
     pad_after = min(max(int(pad_after), 0), sequence_length - 1)
     indices = []

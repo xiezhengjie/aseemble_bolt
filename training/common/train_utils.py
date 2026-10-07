@@ -203,8 +203,6 @@ class SupervisedPolicyTrainer:
                     train_loss = self.agent.fit_epoch(self.train_loader)
                     val_loss = self.agent.eval_epoch(self.val_loader)
                     
-                    if hasattr(self.agent, "lr_decay"):
-                        self.agent.lr_decay(epoch)
                     if self.wb_run is not None:
                         self.wb_run.log({"loss/train": train_loss, "loss/val": val_loss}, step=epoch)
                     if val_loss < best_val - self.min_delta:
@@ -232,7 +230,7 @@ class OffPolicyTrainer:
     - replay.sample 返回 SAC batch 字典
     - learning_starts 按 transition 数计（包含预热）
     - gradient_step 累计策略梯度更新数，控制 Target 更新间隔
-    - 学习率按 global_step / total_timesteps 线性衰减
+    - 学习率由各策略内部的 lr_scheduler 按 num_training_steps 调度
     """
 
     collector_class = DataCollector
@@ -244,7 +242,7 @@ class OffPolicyTrainer:
         save_model_dir="models", is_save_model=True, 
         is_draw=True, log_interval=100, wb_run=None,
         policy_warmup=False, reset_options=None, policy_updates=1,
-        target_update_interval=1, policy_lr_min_ratio=0.3,
+        target_update_interval=1,
     ):
         self.env = env
         self.eval_env = eval_env
@@ -255,7 +253,6 @@ class OffPolicyTrainer:
         self.batch_size = int(batch_size)
         self.policy_updates = int(policy_updates)
         self.target_update_interval = int(target_update_interval)
-        self.policy_lr_min_ratio = policy_lr_min_ratio
         self.seed = seed
         self.eval_interval = int(eval_interval)
         self.eval_episodes = int(eval_episodes)
@@ -349,11 +346,7 @@ class OffPolicyTrainer:
         batch["next_states"] = batch["next_obs"]
         return batch
 
-    def _lr_scale(self, min_ratio: float) -> float:
-        return max(min_ratio, 1.0 - self.global_step / self.total_timesteps)
-
     def _update(self, log_info: bool) -> dict:
-        self.agent.set_lr_scale(self._lr_scale(self.policy_lr_min_ratio))
         info: dict = {}
         for index in range(self.policy_updates):
             batch = self._prepare_batch(self.replay_buffer.sample(self.batch_size))
@@ -429,14 +422,13 @@ class GAILTrainer(OffPolicyTrainer):
         self, *args, discriminator, expert_buffer, generator_buffer,
         disc_updates=2, disc_batch_size=256, env_reward_weight=0.0,
         gail_reward_coef=1.0, gail_reward_scale=True, gamma=0.99,
-        success_reward=100.0, disc_lr_min_ratio=0.1, **kwargs,
+        success_reward=100.0, **kwargs,
     ):
         super().__init__(*args, **kwargs)
         self.discriminator = discriminator
         self.expert_buffer = expert_buffer
         self.generator_buffer = generator_buffer
         self.disc_updates = int(disc_updates)
-        self.disc_lr_min_ratio = float(disc_lr_min_ratio)
         self.disc_batch_size = int(disc_batch_size)
         self.env_reward_weight = float(env_reward_weight)
         self.gail_reward_coef = float(gail_reward_coef)
@@ -467,7 +459,6 @@ class GAILTrainer(OffPolicyTrainer):
         # 判别器在全部策略更新完成后才更新。
         info = super()._update(log_info)
 
-        self.discriminator.set_lr_scale(self._lr_scale(self.disc_lr_min_ratio))
         disc_info: dict = {}
         for index in range(self.disc_updates):
             expert_batch = self.expert_buffer.sample(self.disc_batch_size)
