@@ -21,8 +21,9 @@ trainer:
   
   env_reward_weight: 0
   gail_reward_coef: 1.0
+  gail_reward_clip: 5.0
   success_reward: 100.0
-  residual_scale: 0.1
+  residual_scale: 0.2
   obs_horizon: ${base_policy.n_obs_steps}
   action_interval: ${base_policy.n_action_steps}
   sampling_steps: ${base_policy.num_inference_steps}
@@ -80,6 +81,8 @@ base_policy:
 policy:
   _target_: training.policy.sac_policy.ResidualSACPolicy
   hidden_dim: [256, 256]
+  actor_grad_clip_norm: 1.0
+  critic_grad_clip_norm: 20.0
 
   optimizer:
     actor:

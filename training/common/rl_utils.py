@@ -258,6 +258,26 @@ class RunningMeanStd:
         with np.load(Path(model_dir) / "obs_normalizer.npz") as data:
             self.load_state_dict(data)
 
+class RewardNormalizer:
+    """Scale immediate rewards without centering; update only on collection."""
+
+    def __init__(self, clip=5.0):
+        self.clip = float(clip)
+        if not np.isfinite(self.clip) or self.clip <= 0:
+            raise ValueError("reward clip must be a positive finite number")
+        self.running_ms = RunningMeanStd(shape=(1,))
+
+    def update(self, rewards):
+        self.running_ms.update(np.asarray(rewards).reshape(-1, 1))
+
+    @property
+    def std(self):
+        return float(np.sqrt(self.running_ms.var[0] + 1e-8))
+
+    def normalize(self, rewards):
+        return np.clip(np.asarray(rewards) / self.std, -self.clip, self.clip)
+
+
 class RewardScaling:
     def __init__(self, shape, gamma):
         self.shape = shape  # reward shape=1

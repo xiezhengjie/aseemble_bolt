@@ -11,7 +11,7 @@ from pathlib import Path
 from collections import deque
 from gymnasium.vector import AutoresetMode
 from training.common.eval_utils import Evaluator, ResidualEvaluator
-from training.common.rl_utils import RewardScaling, set_seed
+from training.common.rl_utils import RewardNormalizer, set_seed
 
 _EPISODE_INFO_KEYS = ("depth", "position_error_xy", "yaw_error", "angle_z")
 
@@ -33,6 +33,7 @@ class DataCollector:
         self.agent = agent
         self.replay_buffer = replay_buffer
         self.n_envs = env.num_envs
+        self.transition_callback = None
 
     def reset(self, seed, options=None):
         """训练开始时调用一次；之后回合由 vector env 自动重置。"""
@@ -79,6 +80,9 @@ class DataCollector:
                 else:
                     record[key] = float(value)
             episodes.append(record)
+
+        if self.transition_callback is not None:
+            self.transition_callback(self.obs, actions)
 
         extra = self._transition_extra(next_obs, td_next_obs, terminated, ended, extra)
         self.replay_buffer.add_batch(
@@ -420,7 +424,7 @@ class OffPolicyTrainer:
                     torch.cuda.set_rng_state_all(cuda_states)
         self._log({
             f"eval/{key}": stats[key]
-            for key in ("success_rate", "return_mean", "peak_force_mean")
+            for key in ("success_rate", "return_mean", "length_mean", "peak_force_mean")
         })
 
         if stats["success_rate"] > self.best_success:
@@ -439,7 +443,7 @@ class OffPolicyTrainer:
         self.final_stats = stats
         self._log({
             f"final_eval/{key}": stats[key]
-            for key in ("success_rate", "return_mean", "peak_force_mean")
+            for key in ("success_rate", "return_mean", "length_mean", "peak_force_mean")
         })
         self._save_checkpoint("final_model", stats)
         self._flush_logs()
@@ -487,8 +491,8 @@ class GAILTrainer(OffPolicyTrainer):
     def __init__(
         self, *args, discriminator, expert_buffer, generator_buffer,
         disc_updates=2, disc_batch_size=256, env_reward_weight=0.0,
-        gail_reward_coef=1.0, gail_reward_scale=True, gamma=0.99,
-        success_reward=100.0, **kwargs,
+        gail_reward_coef=1.0, gail_reward_scale=True, gail_reward_clip=5.0,
+        gamma=0.99, success_reward=100.0, **kwargs,
     ):
         super().__init__(*args, **kwargs)
         self.discriminator = discriminator
@@ -498,9 +502,21 @@ class GAILTrainer(OffPolicyTrainer):
         self.disc_batch_size = int(disc_batch_size)
         self.env_reward_weight = float(env_reward_weight)
         self.gail_reward_coef = float(gail_reward_coef)
-        self.reward_scale = RewardScaling((1,), gamma) if gail_reward_scale else None
+        self.reward_normalizer = (
+            RewardNormalizer(clip=gail_reward_clip) if gail_reward_scale else None
+        )
+        if self.reward_normalizer is not None:
+            self.collector.transition_callback = self._update_reward_stats
         self.success_reward = float(success_reward)
         self.disc_losses: list[float] = []
+
+    def _update_reward_stats(self, states, actions):
+        if self.reward_normalizer is None:
+            return
+        rewards = self.discriminator.predict_rewards(
+            self._discriminator_states(states), actions, to_numpy=True,
+        )
+        self.reward_normalizer.update(rewards)
 
     def _discriminator_states(self, states: np.ndarray) -> np.ndarray:
         return states
@@ -511,8 +527,8 @@ class GAILTrainer(OffPolicyTrainer):
             self._discriminator_states(batch["states"]),
             batch["actions"], to_numpy=True,
         ).reshape(-1, 1)
-        if self.reward_scale is not None:
-            reward = self.reward_scale(reward)
+        if self.reward_normalizer is not None:
+            reward = self.reward_normalizer.normalize(reward)
 
         batch["rewards"] = (
             self.gail_reward_coef * reward

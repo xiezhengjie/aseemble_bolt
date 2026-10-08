@@ -28,6 +28,8 @@ training:
 policy:
   _target_: training.policy.sac_policy.SACPolicy
   hidden_dim: [256, 256]
+  actor_grad_clip_norm: 1.0
+  critic_grad_clip_norm: 5.0
 
   optimizer:
     actor:

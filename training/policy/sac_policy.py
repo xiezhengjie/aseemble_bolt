@@ -21,7 +21,9 @@ class SACPolicy(BasePolicy):
                  use_sde=True,
                  clip_mean=2.0,
                  alpha_min: float|None = None,
-                 target_entropy: float|None = None):
+                 target_entropy: float|None = None,
+                 actor_grad_clip_norm=1.0,
+                 critic_grad_clip_norm=5.0):
         """
         optimizer: 各网络优化器超参（actor / critic / alpha），含 lr、betas、eps、weight_decay
         lr_scheduler: 学习率调度器配置（name、num_warmup_steps）
@@ -41,6 +43,12 @@ class SACPolicy(BasePolicy):
         self.action_dim = action_dim
         self.clip_mean = float(clip_mean)
         self.log_std_init = float(log_std_init)
+        self.actor_grad_clip_norm = float(actor_grad_clip_norm)
+        self.critic_grad_clip_norm = float(critic_grad_clip_norm)
+        for name in ("actor_grad_clip_norm", "critic_grad_clip_norm"):
+            value = getattr(self, name)
+            if not np.isfinite(value) or value <= 0:
+                raise ValueError(f"{name} must be a positive finite number")
 
         self.actor = PolicyNet(state_dim, hidden_dim, action_dim,
                                          action_space, log_std_init=log_std_init,
@@ -219,8 +227,10 @@ class SACPolicy(BasePolicy):
         critic_loss = 0.5 * (critic_1_loss + critic_2_loss)
         self.critic_optimizer.zero_grad()
         critic_loss.backward()
-        gn_critic = torch.nn.utils.clip_grad_norm_(list(self.critic_1.parameters()) + 
-                                                   list(self.critic_2.parameters()), 5.0)
+        gn_critic = torch.nn.utils.clip_grad_norm_(
+            list(self.critic_1.parameters()) + list(self.critic_2.parameters()),
+            self.critic_grad_clip_norm,
+        )
         self.critic_optimizer.step()
         self.critic_lr_scheduler.step()
 
@@ -230,7 +240,9 @@ class SACPolicy(BasePolicy):
       
         self.actor_optimizer.zero_grad()
         actor_loss.backward()
-        gn_actor = torch.nn.utils.clip_grad_norm_(self.actor.parameters(), 1.0)
+        gn_actor = torch.nn.utils.clip_grad_norm_(
+            self.actor.parameters(), self.actor_grad_clip_norm,
+        )
         self.actor_optimizer.step()
         self.actor_lr_scheduler.step()
 

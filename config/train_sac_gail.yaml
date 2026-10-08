@@ -18,6 +18,8 @@ trainer:
   disc_batch_size: 256
   env_reward_weight: 0.3
   gail_reward_coef: 1.0
+  gail_reward_scale: true
+  gail_reward_clip: 5.0
   success_reward: 100.0
   is_save_model: true
 
@@ -32,6 +34,8 @@ training:
 policy:
   _target_: training.policy.sac_policy.SACPolicy
   hidden_dim: [256, 256]
+  actor_grad_clip_norm: 1.0
+  critic_grad_clip_norm: 5.0
 
   optimizer:
     actor:

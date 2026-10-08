@@ -88,24 +88,28 @@ class Discriminator(BasePolicy):
         else:
             return {}
     
+    def _predict_logits(self, states, actions):
+        training = self.disc.training
+        try:
+            self.disc.eval()
+            with torch.no_grad():
+                return self.disc(
+                    self._states_to_batch(states), self._as_2d(actions),
+                ).squeeze(-1)
+        finally:
+            self.disc.train(training)
+
     def predict_policy_prob(self, states, actions, to_numpy=True):
         """D = P(policy|s,a) = sigmoid(ℓ)，与 expert_value / policy_value 同一尺度。"""
-        with torch.no_grad():
-            logit = self.disc(self._states_to_batch(states), self._as_2d(actions)).squeeze(-1)
-            d = torch.sigmoid(logit)
-            if to_numpy:
-                return d.cpu().numpy()
-            return d
+        d = torch.sigmoid(self._predict_logits(states, actions))
+        return d.cpu().numpy() if to_numpy else d
 
     def predict_rewards(self, states, actions, to_numpy=True):
         """ r̃ = softplus(−z) """
-        with torch.no_grad():
-            logit = self.disc(self._states_to_batch(states), self._as_2d(actions)).squeeze(-1)
-            z = torch.clamp(logit, -DISC_LOGIT_CLAMP, DISC_LOGIT_CLAMP)  # logit_clamp ∈ [0,1]（clamp=20）
-            reward = F.softplus(-z) 
-        if to_numpy:
-            return reward.cpu().numpy()
-        return reward
+        logit = self._predict_logits(states, actions)
+        z = torch.clamp(logit, -DISC_LOGIT_CLAMP, DISC_LOGIT_CLAMP)
+        reward = F.softplus(-z)
+        return reward.cpu().numpy() if to_numpy else reward
 
     def load_model(self, model_dir):
         _model_dir = Path(model_dir)

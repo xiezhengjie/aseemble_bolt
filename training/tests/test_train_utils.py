@@ -183,7 +183,7 @@ class TrainUtilsTest(unittest.TestCase):
     def test_training_loop_with_real_buffers_and_discriminator(self):
         evaluator = Mock()
         evaluator.evaluate.return_value = dict(success_rate=1.0, return_mean=3.0,
-                                               return_std=0.0, peak_force_mean=0.0)
+                                               return_std=0.0, peak_force_mean=0.0, length_mean=12.5)
         trainer = self.trainer(evaluator=evaluator, eval_interval=4, log_interval=2)
         trainer.discriminator.update = Mock(wraps=trainer.discriminator.update)
         returns = trainer.train()
@@ -266,7 +266,7 @@ class TrainingMetricsTest(unittest.TestCase):
                     self.trainer._save_checkpoint = Mock(side_effect=lambda *args: advance(40))
                     self.trainer.evaluator = Mock()
                     stats = dict(success_rate=1.0, return_mean=0.0,
-                                 return_std=0.0, peak_force_mean=0.0)
+                                 return_std=0.0, peak_force_mean=0.0, length_mean=12.5)
                     self.trainer.evaluator.evaluate.side_effect = (
                         lambda *args, **kwargs: advance(200) or stats)
                     self.run.log.side_effect = log
@@ -383,7 +383,7 @@ class EvaluationSeedTest(unittest.TestCase):
         self.addCleanup(torch.set_rng_state, torch.get_rng_state())
         self.evaluator = Mock()
         self.stats = dict(success_rate=0.0, return_mean=0.0,
-                          return_std=0.0, peak_force_mean=0.0)
+                          return_std=0.0, peak_force_mean=0.0, length_mean=12.5)
         self.evaluator.evaluate.return_value = self.stats
         self.trainer = OffPolicyTrainer(
             Mock(), object(), Mock(), Mock(), 4,
@@ -494,6 +494,15 @@ class EvaluationSeedTest(unittest.TestCase):
         self.assertEqual(self.trainer.final_stats, {})
         self.trainer.wb_run.finish.assert_not_called()
 
+    def test_periodic_evaluation_logs_mean_episode_length(self):
+        self.trainer.wb_run = Mock()
+        self.trainer._save_checkpoint = Mock()
+        logged = []
+        self.trainer.wb_run.log.side_effect = lambda values, step: logged.append(dict(values))
+        self.trainer._evaluate()
+        self.trainer._flush_logs()
+        self.assertEqual(logged[0]["eval/length_mean"], 12.5)
+
     def test_final_results_are_logged_and_saved(self):
         self.trainer.wb_run = Mock()
         self.trainer._save_checkpoint = Mock()
@@ -506,6 +515,7 @@ class EvaluationSeedTest(unittest.TestCase):
             "final_eval/success_rate": 0.0,
             "final_eval/return_mean": 0.0,
             "final_eval/peak_force_mean": 0.0,
+            "final_eval/length_mean": 12.5,
         }, 0)])
 
 
