@@ -3,6 +3,7 @@ import math
 import time
 import torch
 import numpy as np
+import wandb
 
 from tqdm import tqdm
 from pathlib import Path
@@ -17,9 +18,9 @@ _EPISODE_INFO_KEYS = ("depth", "position_error_xy", "yaw_error", "angle_z")
 # 数据采集
 # ---------------------------------------------------------------------------
 class DataCollector:
-    """跨更新步维护观测与回合统计；replay 只存环境原始 obs / reward。
+    """跨更新步维护观测；回合统计读取 EpisodeStatsWrapper 的 final_info。
 
-    子类只需覆盖 `_act`，返回 (actions, extra)：
+    子类覆盖 `_action`，返回 (actions, extra)：
       - actions 会传给 env.step 与 add_batch
       - extra 会展开进 add_batch（如 base_actions / res_actions）
     """
@@ -31,24 +32,21 @@ class DataCollector:
         self.agent = agent
         self.replay_buffer = replay_buffer
         self.n_envs = env.num_envs
-        self.episode_returns = np.zeros(self.n_envs, dtype=np.float64)
-        self.episode_lengths = np.zeros(self.n_envs, dtype=np.int64)
-        self._last_ended = np.zeros(self.n_envs, dtype=bool)
 
     def reset(self, seed, options=None):
         """训练开始时调用一次；之后回合由 vector env 自动重置。"""
         obs, _ = self.env.reset(seed=seed, options=options)
         self.obs = np.asarray(obs, dtype=np.float32).copy()
         self.env.action_space.seed(seed)
-        self.episode_returns.fill(0)
-        self.episode_lengths.fill(0)
-        self._last_ended.fill(False)
 
     def _action(self, warmup: bool) -> tuple[np.ndarray, dict]:
         if warmup:
             return self.env.action_space.sample(), {}
         self.agent.reset_noise(self.n_envs)
         return self.agent.predict_action(self.obs), {}
+
+    def _transition_extra(self, next_obs, td_next_obs, terminated, ended, extra):
+        return extra
 
     def step(self, warmup: bool = False) -> list[dict]:
         actions, extra = self._action(warmup)
@@ -61,38 +59,38 @@ class DataCollector:
         td_next_obs = next_obs.copy()
         successes = np.zeros(self.n_envs, dtype=np.float32)
         episodes: list[dict] = []
-        self.episode_returns += rewards
-        self.episode_lengths += 1
+        final_info = infos.get("final_info", {})
+        final_info = final_info.get("final_info", final_info)
 
         for index in np.flatnonzero(ended):
-            final_info = infos["final_info"]
             td_next_obs[index] = infos["final_obs"][index]
-            success = bool(final_info["success"][index]) if "success" in final_info else False
-            successes[index] = success
-            record = {
-                "episodic_return": float(self.episode_returns[index]),
-                "episodic_length": int(self.episode_lengths[index]),
-                "success": success,
-            }
-            for key in _EPISODE_INFO_KEYS:
-                if key in final_info:
-                    record[key] = float(final_info[key][index])
+            record = {"success": False}
+            for key in ("episodic_return", "episodic_length", "success", *_EPISODE_INFO_KEYS):
+                if key not in final_info:
+                    continue
+                value = np.asarray(final_info[key], dtype=object)
+                value = value.item() if value.ndim == 0 else value[index]
+                if key == "episodic_length":
+                    record[key] = int(value)
+                elif key == "success":
+                    record[key] = bool(value)
+                    successes[index] = float(record[key])
+                else:
+                    record[key] = float(value)
             episodes.append(record)
 
+        extra = self._transition_extra(next_obs, td_next_obs, terminated, ended, extra)
         self.replay_buffer.add_batch(
             obs=self.obs, actions=actions, next_obs=td_next_obs,
             rewards=rewards, dones=terminated, successes=successes,
             **extra,
         )
-        self.episode_returns[ended] = 0
-        self.episode_lengths[ended] = 0
         self.obs = next_obs.copy()
-        self._last_ended = ended
         return episodes
 
 
 class ResidualDataCollector(DataCollector):
-    """基座按块规划，残差逐步执行；history / plan_indices 在下一次 _act 里 lazy 更新。"""
+    """基座按块规划，下一基座动作同时用于 TD target 和下一步执行。"""
 
     def __init__(
         self, env, base_agent, res_agent, replay_buffer,
@@ -116,23 +114,16 @@ class ResidualDataCollector(DataCollector):
         self.history = np.repeat(self.obs[:, None, :], self.obs_horizon, axis=1)
         self.action_plans = None
         self.plan_indices = np.zeros(self.n_envs, dtype=np.int64)
-        self._pending_history = False
+        self.prev_naction = None
+        self.base_actions = self._plan_base_actions()
 
     def _action(self, warmup: bool) -> tuple[np.ndarray, dict]:
-        # lazy 更新：把上一次 step 后的 obs 追加进 history，并处理回合结束。
-        if self._pending_history:
-            self.history = np.concatenate(
-                [self.history[:, 1:], self.obs[:, None, :]], axis=1,
-            )
-            self.history[self._last_ended] = self.obs[self._last_ended, None, :]
-            self.plan_indices[self._last_ended] = self.action_interval
-        self._pending_history = True
-
-        base_actions = self._plan_base_actions()
+        base_actions = self.base_actions.copy()
         res_actions = np.zeros_like(base_actions)
         if not warmup:
             self.agent.reset_noise(self.n_envs)
-            res_actions = np.asarray(self.agent.predict_action(self.obs), dtype=np.float32)
+            residual_obs = np.concatenate([self.obs, base_actions], axis=-1)
+            res_actions = np.asarray(self.agent.predict_action(residual_obs), dtype=np.float32)
 
         actions = np.clip(
             base_actions + self.residual_scale * res_actions,
@@ -142,34 +133,65 @@ class ResidualDataCollector(DataCollector):
         # 保存缩放前的残差；环境与判别器使用裁剪后的执行动作。
         return actions, {"base_actions": base_actions, "res_actions": res_actions}
 
+    def _transition_extra(self, next_obs, td_next_obs, terminated, ended, extra):
+        self.history = np.concatenate(
+            [self.history[:, 1:], td_next_obs[:, None, :]], axis=1,
+        )
+        self.plan_indices += 1
+
+        next_base_actions = np.zeros_like(self.base_actions)
+        indices = np.flatnonzero(~terminated)
+        if indices.size:
+            next_base_actions[indices] = self._plan_base_actions(indices)
+
+        # timeout 仍从旧回合终帧 bootstrap；实际执行从新回合重新规划。
+        self.history[ended] = next_obs[ended, None, :]
+        self.plan_indices[ended] = self.action_interval
+        if self.prev_naction is not None:
+            self.prev_naction[ended] = 0
+        self.base_actions = self._plan_base_actions()
+        return {**extra, "next_base_actions": next_base_actions}
+
     @torch.no_grad()
-    def _plan_base_actions(self) -> np.ndarray:
-        if self.action_plans is None:
+    def _sample_base_plans(self, indices):
+        obs_tensor = torch.from_numpy(self.history[indices]).to(self.base_agent.device)
+        previous = self.base_agent.prev_naction
+        try:
+            # diffusion 先验按环境保存，子批次重规划和评估不能串用历史。
+            self.base_agent.prev_naction = (
+                None if self.prev_naction is None else self.prev_naction[indices].clone()
+            )
+            plans = self.base_agent.sample(obs_tensor, self.sampling_steps)
+            prior = self.base_agent.prev_naction
+            if prior is not None:
+                if self.prev_naction is None:
+                    self.prev_naction = prior.new_zeros((self.n_envs,) + prior.shape[1:])
+                self.prev_naction[indices] = prior
+        finally:
+            self.base_agent.prev_naction = previous
+        return plans.detach().cpu().numpy().astype(np.float32, copy=False)
+
+    @torch.no_grad()
+    def _plan_base_actions(self, indices=None) -> np.ndarray:
+        if indices is None:
             indices = np.arange(self.n_envs)
+        if self.action_plans is None:
+            replan = indices
         else:
             # 块耗尽时重新规划，允许 action_interval 大于基座输出长度。
             plan_length = min(self.action_interval, self.action_plans.shape[1])
-            indices = np.flatnonzero(self.plan_indices >= plan_length)
+            replan = indices[self.plan_indices[indices] >= plan_length]
 
-        if indices.size:
-            obs_tensor = torch.from_numpy(self.history[indices])
-            plans = self.base_agent.sample(obs_tensor.to(self.base_agent.device), self.sampling_steps)
-            plans = plans.detach().cpu().numpy().astype(np.float32, copy=False)
-            if (plans.ndim != 3 or plans.shape[0] != len(indices)
-                    or plans.shape[1] < 1
-                    or plans.shape[2:] != self.env.single_action_space.shape):
-                raise ValueError("基座 sample 必须返回 (num_envs, action_horizon, action_dim)")
-
+        if replan.size:
+            plans = self._sample_base_plans(replan)
             if self.action_plans is None:
                 self.action_plans = np.empty(
                     (self.n_envs,) + plans.shape[1:], dtype=np.float32,
                 )
-            self.action_plans[indices] = plans
-            self.plan_indices[indices] = 0
+            self.action_plans[replan] = plans
+            self.plan_indices[replan] = 0
 
-        actions = self.action_plans[np.arange(self.n_envs), self.plan_indices].copy()
-        self.plan_indices += 1
-        return actions
+        return self.action_plans[indices, self.plan_indices[indices]].copy()
 
 
 # ---------------------------------------------------------------------------
@@ -311,15 +333,16 @@ class OffPolicyTrainer:
                         self.success_history.append(episode["success"])
                     for key in episodes[0] if episodes else ():
                         metric = "episode_success" if key == "success" else key
+                        tag = "tasks" if key in _EPISODE_INFO_KEYS else "charts"
                         self._log({
-                            f"charts/{metric}": np.mean([
+                            f"{tag}/{metric}": np.mean([
                                 episode[key] for episode in episodes if key in episode
                             ])
                         })
                     if episodes:
                         self._log({
-                            "charts/avg_episodic_return": np.mean(self.return_list[-10:]),
-                            "charts/success_rate_50ep": np.mean(self.success_history),
+                            "charts/episodic_return_30ep": np.mean(self.return_list[-30:]),
+                            "charts/success_rate_30ep": np.mean(self.success_history),
                         })
                     if episodes or should_log:
                         self._log({
@@ -419,6 +442,18 @@ class OffPolicyTrainer:
         }
         with (path / "info.json").open("w", encoding="utf-8") as file:
             json.dump(info, file, indent=2, ensure_ascii=False)
+        self._upload_checkpoint(path)
+
+    def _upload_checkpoint(self, path: Path) -> None:
+        """把已写入的 checkpoint 文件同步到当前 W&B run。"""
+        if self.wb_run is None:
+            return
+        for model_path in sorted(path.iterdir()):
+            if model_path.is_file():
+                wandb.save(
+                    str(model_path.resolve()),
+                    base_path=str(path.parent.resolve()), policy="now",
+                )
 
 
 # ---------------------------------------------------------------------------
@@ -486,9 +521,12 @@ class GAILTrainer(OffPolicyTrainer):
         return info
 
     def _save_checkpoint(self, name: str, stats: dict) -> None:
+        if not self.is_save_model:
+            return
+        path = self.save_model_dir / name
+        path.mkdir(parents=True, exist_ok=True)
+        self.discriminator.save_model(path)
         super()._save_checkpoint(name, stats)
-        if self.is_save_model:
-            self.discriminator.save_model(self.save_model_dir / name)
 
 
 class ResidualGAILTrainer(GAILTrainer):
@@ -527,8 +565,5 @@ class ResidualGAILTrainer(GAILTrainer):
 
     def _prepare_batch(self, batch: dict) -> dict:
         batch = super()._prepare_batch(batch)
-        raw_obs_dim = int(self.env.single_observation_space.shape[-1])
-        batch["states"] = batch["obs"][..., :raw_obs_dim]
-        batch["next_states"] = batch["next_obs"]
         batch["actions"] = batch["res_actions"]
         return batch

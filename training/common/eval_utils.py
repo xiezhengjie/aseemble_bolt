@@ -107,8 +107,10 @@ class ResidualEvaluator(BaseChunkPolicyEvaluator):
                 obs_tensor = torch.from_numpy(obs_window).unsqueeze(0)
                 action_plan = self.agent.sample(obs_tensor, self.sampling_steps)[0].cpu().numpy()
                 plan_index = 0
-            residual_action = self.residual_agent.predict_action(obs, deterministic=True)
-            action = np.clip(action_plan[plan_index] + self.residual_scale * residual_action,
+            base_action = action_plan[plan_index]
+            residual_obs = np.concatenate([obs, base_action], axis=-1)
+            residual_action = self.residual_agent.predict_action(residual_obs, deterministic=True)
+            action = np.clip(base_action + self.residual_scale * residual_action,
                              env.action_space.low, env.action_space.high)
             plan_index += 1
             obs, _, terminated, truncated, info = env.step(action)

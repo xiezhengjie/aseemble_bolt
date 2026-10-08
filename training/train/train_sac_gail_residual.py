@@ -17,7 +17,7 @@ from gymnasium.vector import AutoresetMode
 from omegaconf import DictConfig, OmegaConf
 from training.common.rl_utils import make_env, set_seed
 from training.common.train_utils import ResidualGAILTrainer
-from training.policy.sac_policy import SACPolicy
+from training.policy.sac_policy import ResidualSACPolicy
 from training.policy.discriminator_policy import Discriminator
 from training.policy.diffusion_policy import DiffusionPolicy
 
@@ -83,9 +83,9 @@ def main(cfg: DictConfig):
         math.ceil(int(cfg.trainer.total_timesteps) / n_envs)
         - int(cfg.trainer.learning_starts) // n_envs
     )
-    agent: SACPolicy = hydra.utils.instantiate(
+    agent: ResidualSACPolicy = hydra.utils.instantiate(
         cfg.policy,
-        state_dim=state_dim,
+        state_dim=state_dim + action_dim,
         action_dim=action_dim,
         action_space=residual_space,
         num_training_steps=update_steps * int(cfg.trainer.policy_updates),

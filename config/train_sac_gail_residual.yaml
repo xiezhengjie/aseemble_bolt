@@ -9,14 +9,14 @@ trainer:
   learning_starts: 5000     # 前 5000 步只用基座动作采集（基座预热），期间不做更新
   use_warmup: true          # 启用基座预热阶段；false 表示残差策略从第 0 步直接参与
   batch_size: 128
-  policy_updates: 1
+  policy_updates: 5
   target_update_interval: 2
   eval_interval: 50000
   eval_episodes: 10
   final_eval_episodes: 30
   log_interval: 100
 
-  disc_updates: 2
+  disc_updates: 6
   disc_batch_size: 64
   
   env_reward_weight: 0
@@ -77,7 +77,7 @@ base_policy:
     prediction_type: epsilon
 
 policy:
-  _target_: training.policy.sac_policy.SACPolicy
+  _target_: training.policy.sac_policy.ResidualSACPolicy
   hidden_dim: [256, 256]
 
   optimizer:
@@ -99,7 +99,7 @@ policy:
 
   lr_scheduler:
     name: cosine
-    num_warmup_steps: 5
+    num_warmup_steps: 0
 
   gamma: 0.99
   tau: 0.005
@@ -122,9 +122,10 @@ discriminator:
 
   lr_scheduler:
     name: cosine
-    num_warmup_steps: 10000
+    num_warmup_steps: 20000
 
   smoothing: 0.05
+  dropout: 0.1
   ent_reg_scale: 0.001
   grad_clip_norm: 1.0
 

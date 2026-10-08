@@ -17,6 +17,7 @@ from gymnasium.vector import AutoresetMode
 from omegaconf import DictConfig, OmegaConf
 from training.policy.sac_policy import SACPolicy
 from training.common.rl_utils import make_env, set_seed
+from training.common.train_utils import OffPolicyTrainer
 
 OmegaConf.register_new_resolver("eval", eval, replace=True)
 
@@ -62,6 +63,7 @@ def main(cfg: DictConfig):
         math.ceil(int(cfg.trainer.total_timesteps) / n_envs)
         - int(cfg.trainer.learning_starts) // n_envs
     ) * int(cfg.trainer.policy_updates)
+    
     agent: SACPolicy = hydra.utils.instantiate(
         cfg.policy,
         state_dim=state_dim,
@@ -71,7 +73,7 @@ def main(cfg: DictConfig):
     ).to(device)
 
     # 训练器创建
-    trainer = hydra.utils.instantiate(
+    trainer: OffPolicyTrainer = hydra.utils.instantiate(
         cfg.trainer,
         env=env,
         eval_env=eval_env,

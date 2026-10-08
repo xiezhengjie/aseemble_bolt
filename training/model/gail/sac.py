@@ -3,7 +3,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.distributions import Normal
-from training.common.rl_utils import orthogonal_init
+from training.common.rl_utils import orthogonal_init, layer_init
 
 LOG_STD_MAX = 2.0
 LOG_STD_MIN = -20.0
@@ -12,8 +12,7 @@ LOG_STD_MIN = -20.0
 class PolicyNet(torch.nn.Module):
 
     def __init__(self, state_dim, hidden_dim, action_dim, action_space,
-                 log_std_init=-3.0, use_sde=True, use_orthogonal_init=False,
-                 clip_mean=2.0):
+                 log_std_init=-3.0, use_sde=True, clip_mean=2.0):
         super().__init__()
         self.action_dim = action_dim
         self.hidden_dim = list(hidden_dim)
@@ -25,8 +24,10 @@ class PolicyNet(torch.nn.Module):
         input_dim = int(state_dim)
         for output_dim in hidden_dim:
             layers.append(nn.Linear(input_dim, output_dim))
-            layers.append(nn.ReLU())
+            layers.append(nn.LayerNorm(output_dim))
+            layers.append(nn.SiLU())
             input_dim = output_dim
+        
         self.fc_latent = nn.Sequential(*layers)
         self.fc_mu = nn.Linear(hidden_dim[-1], action_dim)
         # 限制均值输出范围
@@ -60,9 +61,6 @@ class PolicyNet(torch.nn.Module):
             self.learn_features = False
             self.log_std = nn.Parameter(torch.full((action_dim,), float(log_std_init)))
 
-        if use_orthogonal_init:
-            orthogonal_init(self.fc_latent)
-            orthogonal_init(self.fc_mu, gain=0.01)
 
     def reset_noise(self, batch_size=1):
         """SB3 StateDependentNoiseDistribution.sample_weights。
@@ -172,27 +170,20 @@ class PolicyNet(torch.nn.Module):
 
 
 class QValueNet(torch.nn.Module):
-    def __init__(self, state_dim, hidden_dim, action_dim, use_orthogonal_init=False, use_layer_norm=False):
+    def __init__(self, state_dim, hidden_dim, action_dim):
         super().__init__()
-        self.use_layer_norm = bool(use_layer_norm)
         layers = []
         input_dim = int(state_dim) + action_dim
         for output_dim in hidden_dim:
             layers.append(nn.Linear(input_dim, output_dim))
-            if self.use_layer_norm:
-                layers.append(nn.LayerNorm(output_dim))
-            layers.append(nn.ReLU())
+            layers.append(nn.LayerNorm(output_dim))
+            layers.append(nn.SiLU())
             input_dim = output_dim
         self.fc_latent = nn.Sequential(*layers)
         self.fc_out = nn.Linear(hidden_dim[-1], 1)
-        if use_orthogonal_init:
-            orthogonal_init(self.fc_latent)
-            orthogonal_init(self.fc_out)
 
     def forward(self, x, a):
         cat = torch.cat([x, a], dim=1)
         h = self.fc_latent(cat)
-        if not self.use_layer_norm:
-            h = F.relu(h)
         return self.fc_out(h)
 

@@ -14,7 +14,7 @@ class Discriminator(BasePolicy):
     def __init__(self, state_dim, action_dim, hidden_dim,
                  optimizer: Dict, lr_scheduler: Dict, num_training_steps: int,
                  smoothing=0.1, grad_clip_norm=None,
-                 ent_reg_scale=0.001):
+                 ent_reg_scale=0.001, dropout=0.1):
         super().__init__()
         ent_reg_scale = float(ent_reg_scale)
         if not math.isfinite(ent_reg_scale) or ent_reg_scale < 0.0:
@@ -24,7 +24,7 @@ class Discriminator(BasePolicy):
         self.smoothing = smoothing
         self.grad_clip_norm = grad_clip_norm
         self.ent_reg_scale = ent_reg_scale
-        self.disc = DiscriminatorNN(state_dim, action_dim, hidden_dim).to(self.device)
+        self.disc = DiscriminatorNN(state_dim, action_dim, hidden_dim, dropout=dropout).to(self.device)
         self.disc_optim = torch.optim.AdamW(
             self.disc.parameters(),
             lr=optimizer['lr'],

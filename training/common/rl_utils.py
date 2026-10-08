@@ -1,5 +1,6 @@
 import json
 import torch
+import torch.nn as nn
 import numpy as np
 import random
 from pathlib import Path
@@ -64,6 +65,25 @@ def orthogonal_init(module, gain=np.sqrt(2), bias=0.0):
             orthogonal_init(child, gain=gain, bias=bias)
     else:
         raise TypeError(f"orthogonal_init 不支持的类型: {type(module)}")
+
+def layer_init(layer, nonlinearity="ReLU", std=np.sqrt(2), bias_const=0.0):
+    if isinstance(layer, nn.Linear):
+        if nonlinearity == "ReLU":
+            nn.init.kaiming_normal_(layer.weight, mode="fan_in", nonlinearity="relu")
+        elif nonlinearity == "SiLU":
+            nn.init.kaiming_normal_(
+                layer.weight, mode="fan_in", nonlinearity="relu"
+            )  # Use relu for Swish
+        elif nonlinearity == "Tanh":
+            torch.nn.init.orthogonal_(layer.weight, std)
+        else:
+            nn.init.xavier_normal_(layer.weight)
+
+    # Only initialize the bias if it exists
+    if layer.bias is not None:
+        torch.nn.init.constant_(layer.bias, bias_const)
+
+    return layer
 
 def find_project_root():
     current = Path(__file__).resolve().parent

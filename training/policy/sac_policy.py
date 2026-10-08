@@ -19,7 +19,6 @@ class SACPolicy(BasePolicy):
                  log_std_init=-3,
                  autotune=True,
                  use_sde=True,
-                 use_orthogonal_init=False,
                  clip_mean=2.0,
                  alpha_min: float|None = None,
                  target_entropy: float|None = None):
@@ -42,22 +41,18 @@ class SACPolicy(BasePolicy):
         self.action_dim = action_dim
         self.clip_mean = float(clip_mean)
         self.log_std_init = float(log_std_init)
-        self.use_orthogonal_init = bool(use_orthogonal_init)
 
         self.actor = PolicyNet(state_dim, hidden_dim, action_dim,
                                          action_space, log_std_init=log_std_init,
-                                         use_sde=use_sde, use_orthogonal_init=use_orthogonal_init,
+                                         use_sde=use_sde,
                                          clip_mean=clip_mean).to(self.device)
-        self.critic_1 = QValueNet(state_dim, hidden_dim,
-                                            action_dim, use_orthogonal_init).to(self.device)
-        self.critic_2 = QValueNet(state_dim, hidden_dim,
-                                            action_dim, use_orthogonal_init).to(self.device)
-        self.target_critic_1 = QValueNet(state_dim,
-                                                   hidden_dim, action_dim, use_orthogonal_init).to(self.device)
-        self.target_critic_2 = QValueNet(state_dim,
-                                                   hidden_dim, action_dim, use_orthogonal_init).to(self.device)
+        self.critic_1 = QValueNet(state_dim, hidden_dim, action_dim).to(self.device)
+        self.critic_2 = QValueNet(state_dim, hidden_dim, action_dim).to(self.device)
+        self.target_critic_1 = QValueNet(state_dim, hidden_dim, action_dim).to(self.device)
+        self.target_critic_2 = QValueNet(state_dim, hidden_dim, action_dim).to(self.device)
         self.target_critic_1.load_state_dict(self.critic_1.state_dict())
         self.target_critic_2.load_state_dict(self.critic_2.state_dict())
+
         self.actor_optimizer = torch.optim.AdamW(
             self.actor.parameters(),
             lr=optimizer['actor']['lr'],
@@ -243,8 +238,7 @@ class SACPolicy(BasePolicy):
             if self.autotune:
                 self.alpha = self.log_alpha.exp().item()
             info = {
-                "critic_1_value": critic_1_values.mean().item(),
-                "critic_2_value": critic_2_values.mean().item(),
+                "critic_value": (critic_1_values.mean().item() + critic_2_values.mean().item()) / 2.0,
                 "critic_loss": critic_loss.item(),
                 "alpha": self.alpha if isinstance(self.alpha, float) else float(self.alpha),
             }
@@ -275,3 +269,15 @@ class SACPolicy(BasePolicy):
         save_state_dict(self.critic_2.state_dict(), _model_dir, "qvalue_net2")
         cfg = self.actor.export_cfg()
         save_policy_cfg(cfg, _model_dir)
+
+
+class ResidualSACPolicy(SACPolicy):
+    """以当前观测和基座动作为条件，输出缩放前的残差动作。"""
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.obs_dim = self.state_dim - self.action_dim
+
+    def normalize_obs(self, obs):
+        states = super().normalize_obs(obs[..., :self.obs_dim])
+        return torch.cat([states, obs[..., self.obs_dim:]], dim=-1)

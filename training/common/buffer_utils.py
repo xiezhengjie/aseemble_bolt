@@ -132,21 +132,23 @@ class ReplayBuffer(BaseBuffer):
 
 
 class ResidualReplayBuffer(BaseBuffer):
-    """残差网络回放池；obs 落库时尾部拼接 base_actions。"""
+    """残差网络回放池；当前和下一观测分别拼接对应的基座动作。"""
 
     def add_batch(self, obs, base_actions, actions, res_actions,
-                  rewards, next_obs, dones, successes):
+                  rewards, next_obs, next_base_actions, dones, successes):
+        self.raw_obs_dim = np.asarray(obs).shape[-1]
         return super().add_batch(
             obs=np.concatenate([obs, base_actions], axis=-1),
-            actions=actions,
+            actions=actions,    # 判别器输入
             res_actions=res_actions,
             rewards=rewards,
-            next_obs=next_obs,
+            next_obs=np.concatenate([next_obs, next_base_actions], axis=-1),
             dones=dones,
             successes=successes,
         )
 
-    def add(self, obs, base_action, action, res_action, reward, next_obs, done, success):
+    def add(self, obs, base_action, action, res_action, reward, next_obs,
+            next_base_action, done, success):
         return self.add_batch(
             obs=np.asarray(obs)[None],
             base_actions=np.asarray(base_action)[None],
@@ -154,6 +156,7 @@ class ResidualReplayBuffer(BaseBuffer):
             res_actions=np.asarray(res_action)[None],
             rewards=np.asarray([reward]),
             next_obs=np.asarray(next_obs)[None],
+            next_base_actions=np.asarray(next_base_action)[None],
             dones=np.asarray([done]),
             successes=np.asarray([success]),
         )
@@ -178,7 +181,7 @@ class GenWindowView:
 
         obs = self.buffer_r.obs[idx]
         if isinstance(self.buffer_r, ResidualReplayBuffer):
-            obs = obs[..., :self.buffer_r.next_obs.shape[-1]]
+            obs = obs[..., :self.buffer_r.raw_obs_dim]
         a_exec = self.buffer_r.actions[idx]
         s_cur = obs[:, -1, :] if self.current_frame and obs.ndim >= 3 else obs
         return s_cur, a_exec
