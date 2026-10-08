@@ -1,5 +1,5 @@
 env:
-  num_envs: 10
+  num_envs: 8
   max_episode_steps: 400
 
 trainer:
@@ -8,15 +8,15 @@ trainer:
   total_timesteps: 2000000
   learning_starts: 5000     # 前 5000 步只用基座动作采集（基座预热），期间不做更新
   use_warmup: true          # 启用基座预热阶段；false 表示残差策略从第 0 步直接参与
-  batch_size: 128
-  policy_updates: 5
-  target_update_interval: 2
-  eval_interval: 50000
-  eval_episodes: 10
+  batch_size: 256
+  policy_updates: 1
+  target_update_interval: 1
+  eval_interval: 10000
+  eval_episodes: 30
   final_eval_episodes: 30
   log_interval: 100
 
-  disc_updates: 6
+  disc_updates: 2
   disc_batch_size: 64
   
   env_reward_weight: 0
@@ -32,6 +32,7 @@ trainer:
 training:
   seed: ${trainer.seed}      # set_seed 用
   eval_env_seed: 100000
+  eval_num_envs: 8
   eval_seed: 200000
   buffer_size: 1000000       # buffers.replay.capacity 用
   generator_window: 50000    # buffers.generator.window_size 用
@@ -112,7 +113,7 @@ policy:
 
 discriminator:
   _target_: training.policy.discriminator_policy.Discriminator
-  hidden_dim: [128, 128]
+  hidden_dim: [64, 64]
 
   optimizer:
     lr: 1e-4
@@ -127,7 +128,7 @@ discriminator:
   smoothing: 0.05
   dropout: 0.1
   ent_reg_scale: 0.001
-  grad_clip_norm: 1.0
+  grad_clip_norm: 5.0
 
 buffers:
   expert:

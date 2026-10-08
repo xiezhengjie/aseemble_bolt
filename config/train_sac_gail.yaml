@@ -1,5 +1,5 @@
 env:
-  num_envs: 4
+  num_envs: 8
   max_episode_steps: 400
 
 trainer:
@@ -24,6 +24,7 @@ trainer:
 training:
   seed: ${trainer.seed}      # set_seed 用
   eval_env_seed: 100000
+  eval_num_envs: 8
   eval_seed: 200000
   buffer_size: 200000         # buffers.replay.capacity 用
   generator_window: 50000    # buffers.generator.window_size 用
@@ -64,7 +65,7 @@ policy:
 
 discriminator:
   _target_: training.policy.discriminator_policy.Discriminator
-  hidden_dim: [128, 128]
+  hidden_dim: [64, 64]
 
   optimizer:
     lr: 1e-4

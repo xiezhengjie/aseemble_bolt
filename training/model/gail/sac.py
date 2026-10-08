@@ -168,7 +168,6 @@ class PolicyNet(torch.nn.Module):
         return net.to(device)
 
 
-
 class QValueNet(torch.nn.Module):
     def __init__(self, state_dim, hidden_dim, action_dim):
         super().__init__()

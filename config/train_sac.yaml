@@ -1,5 +1,5 @@
 env:
-  num_envs: 1
+  num_envs: 8
   max_episode_steps: 400
 
 # Trainer 是这些超参的主定义方（字面值在此）；
@@ -21,6 +21,7 @@ trainer:
 training:
   seed: ${trainer.seed}     # set_seed 用
   eval_env_seed: 100000
+  eval_num_envs: 8
   eval_seed: 200000
   buffer_size: 100000        # buffers.replay.capacity 用
 

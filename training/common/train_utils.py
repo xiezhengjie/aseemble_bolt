@@ -1,4 +1,5 @@
 import json
+import random
 import math
 import time
 import torch
@@ -10,7 +11,7 @@ from pathlib import Path
 from collections import deque
 from gymnasium.vector import AutoresetMode
 from training.common.eval_utils import Evaluator, ResidualEvaluator
-from training.common.rl_utils import RewardScaling
+from training.common.rl_utils import RewardScaling, set_seed
 
 _EPISODE_INFO_KEYS = ("depth", "position_error_xy", "yaw_error", "angle_z")
 
@@ -248,7 +249,7 @@ class SupervisedPolicyTrainer:
 class OffPolicyTrainer:
     """统一采集、预热、多次策略更新、日志、评估和保存。
 
-    - eval_env 必须是独立单环境
+    - eval_env 必须独立于训练环境；支持单环境或 SAME_STEP VectorEnv
     - replay.sample 返回 SAC batch 字典
     - learning_starts 按 transition 数计（包含预热）
     - use_warmup=True 时前 learning_starts 步采集预热动作（随机 / 纯基座），期间不做更新
@@ -265,7 +266,7 @@ class OffPolicyTrainer:
         save_model_dir="models", is_save_model=True, 
         is_draw=True, log_interval=100, wb_run=None,
         use_warmup=True, reset_options=None, policy_updates=1,
-        target_update_interval=1,
+        target_update_interval=1, eval_seed=None, eval_env_seed=None,
     ):
         self.env = env
         self.eval_env = eval_env
@@ -280,6 +281,8 @@ class OffPolicyTrainer:
         self.eval_interval = int(eval_interval)
         self.eval_episodes = int(eval_episodes)
         self.final_eval_episodes = int(final_eval_episodes)
+        self.eval_seed = None if eval_seed is None else int(eval_seed)
+        self.eval_env_seed = None if eval_env_seed is None else int(eval_env_seed)
         self.log_interval = int(log_interval)
         self.is_save_model = is_save_model
         self.save_model_dir = Path(save_model_dir)
@@ -292,7 +295,11 @@ class OffPolicyTrainer:
         self.global_step = 0
         self.gradient_step = 0
         self.return_list: list[float] = []
-        self.success_history: deque[bool] = deque(maxlen=50)
+        self.ep_length_list: deque[int] = deque(maxlen=30)
+        self.success_history: deque[bool] = deque(maxlen=30)
+        self.episode_info_history = {
+            key: deque(maxlen=30) for key in _EPISODE_INFO_KEYS
+        }
         self.best_success = -float("inf")
         self.final_stats: dict = {}
         self.wb_run = wb_run if is_draw else None
@@ -331,24 +338,23 @@ class OffPolicyTrainer:
                     for episode in episodes:
                         self.return_list.append(episode["episodic_return"])
                         self.success_history.append(episode["success"])
-                    for key in episodes[0] if episodes else ():
-                        metric = "episode_success" if key == "success" else key
-                        tag = "tasks" if key in _EPISODE_INFO_KEYS else "charts"
-                        self._log({
-                            f"{tag}/{metric}": np.mean([
-                                episode[key] for episode in episodes if key in episode
-                            ])
-                        })
+                        self.ep_length_list.append(episode["episodic_length"])
+                        for key in _EPISODE_INFO_KEYS:
+                            if key in episode:
+                                self.episode_info_history[key].append(episode[key])
+
                     if episodes:
+                        for key in _EPISODE_INFO_KEYS:
+                            history = self.episode_info_history[key]
+                            if history:
+                                self._log({f"tasks/{key}": np.mean(history)})
+
                         self._log({
                             "charts/episodic_return_30ep": np.mean(self.return_list[-30:]),
                             "charts/success_rate_30ep": np.mean(self.success_history),
+                            "charts/episode_length_30ep": np.mean(self.ep_length_list),
                         })
-                    if episodes or should_log:
-                        self._log({
-                            "charts/completed_episodes": len(self.return_list),
-                            "charts/success_count": sum(self.success_history),
-                        })
+
                     bar.update(self.env.num_envs)
                     # Evaluation and log flush must not enter the training throughput window.
                     window_elapsed += time.perf_counter() - step_started
@@ -391,11 +397,27 @@ class OffPolicyTrainer:
         return info
 
     def _evaluate(self) -> dict:
-        stats = self.evaluator.evaluate(
-            self.eval_env,
-            n_episodes=self.eval_episodes,
-            seed_offset=None,
-        )
+        rng_state = None
+        if self.eval_seed is not None:
+            rng_state = (
+                random.getstate(), np.random.get_state(), torch.get_rng_state(),
+                torch.cuda.get_rng_state_all() if torch.cuda.is_available() else None,
+            )
+            set_seed(self.eval_seed)
+        try:
+            stats = self.evaluator.evaluate(
+                self.eval_env,
+                n_episodes=self.eval_episodes,
+                seed_offset=self.eval_env_seed,
+            )
+        finally:
+            if rng_state is not None:
+                python_state, numpy_state, torch_state, cuda_states = rng_state
+                random.setstate(python_state)
+                np.random.set_state(numpy_state)
+                torch.set_rng_state(torch_state)
+                if cuda_states is not None:
+                    torch.cuda.set_rng_state_all(cuda_states)
         self._log({
             f"eval/{key}": stats[key]
             for key in ("success_rate", "return_mean", "peak_force_mean")

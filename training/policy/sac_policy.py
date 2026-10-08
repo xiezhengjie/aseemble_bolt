@@ -219,8 +219,8 @@ class SACPolicy(BasePolicy):
         critic_loss = 0.5 * (critic_1_loss + critic_2_loss)
         self.critic_optimizer.zero_grad()
         critic_loss.backward()
-        torch.nn.utils.clip_grad_norm_(
-            list(self.critic_1.parameters()) + list(self.critic_2.parameters()), 5.0)
+        gn_critic = torch.nn.utils.clip_grad_norm_(list(self.critic_1.parameters()) + 
+                                                   list(self.critic_2.parameters()), 5.0)
         self.critic_optimizer.step()
         self.critic_lr_scheduler.step()
 
@@ -230,7 +230,7 @@ class SACPolicy(BasePolicy):
       
         self.actor_optimizer.zero_grad()
         actor_loss.backward()
-        torch.nn.utils.clip_grad_norm_(self.actor.parameters(), 1.0)
+        gn_actor = torch.nn.utils.clip_grad_norm_(self.actor.parameters(), 1.0)
         self.actor_optimizer.step()
         self.actor_lr_scheduler.step()
 
@@ -241,7 +241,10 @@ class SACPolicy(BasePolicy):
                 "critic_value": (critic_1_values.mean().item() + critic_2_values.mean().item()) / 2.0,
                 "critic_loss": critic_loss.item(),
                 "alpha": self.alpha if isinstance(self.alpha, float) else float(self.alpha),
+                "gn_critic": gn_critic.item(),
+                "gn_actor": gn_actor.item(),
             }
+            info["actor_loss"] = actor_loss.item()
             if self.autotune:
                 info["alpha_loss"] = alpha_loss.item()
             info["actor_loss"] = actor_loss.item()

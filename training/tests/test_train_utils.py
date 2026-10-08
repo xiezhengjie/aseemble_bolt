@@ -4,7 +4,7 @@ import importlib
 import random
 import unittest
 from pathlib import Path
-from unittest.mock import Mock, call, patch
+from unittest.mock import MagicMock, Mock, call, patch
 
 import gymnasium as gym
 import numpy as np
@@ -299,6 +299,25 @@ class TrainingMetricsTest(unittest.TestCase):
                if "charts/SPS" in values]
         self.assertEqual(sps, [(3.0, 6), (3.0, 12), (3.0, 15)])
 
+    def test_task_metrics_use_the_last_30_completed_episodes(self):
+        episodes = [
+            dict(
+                episodic_return=float(index),
+                episodic_length=1,
+                success=False,
+                depth=float(index),
+            )
+            for index in range(31)
+        ]
+        self.trainer.total_timesteps = len(episodes)
+        self.trainer.log_interval = 1
+        self.collector.step.side_effect = [[episode] for episode in episodes]
+
+        self.train()
+
+        values = self.logged[-1][0]
+        self.assertEqual(values["tasks/depth"], np.mean(range(1, 31)))
+
     def test_no_completed_episodes_logs_zero_counts_without_success_rate(self):
         self.train()
         self.assertEqual([step for _, step in self.logged], [2, 4])
@@ -404,6 +423,44 @@ class EvaluationSeedTest(unittest.TestCase):
             call(self.trainer.eval_env, n_episodes=2, seed_offset=None),
         ])
 
+    def test_fixed_evaluation_seeds_preserve_training_rng(self):
+        self.trainer.eval_seed = 200000
+        self.trainer.eval_env_seed = 100000
+        samples = []
+        self.evaluator.evaluate.side_effect = lambda *args, **kwargs: (
+            samples.append(self.draw_random_values()) or self.stats
+        )
+        self.draw_random_values()
+        rng = (random.getstate(), np.random.get_state(), torch.get_rng_state())
+        self.trainer._evaluate()
+        self.trainer._evaluate()
+        self.assertEqual(samples[0], samples[1])
+        self.assertEqual(samples[0][0], random.Random(200000).random())
+        self.assertEqual(samples[0][1], float(np.random.RandomState(200000).random()))
+        self.assertEqual(samples[0][2], float(torch.rand(
+            (), generator=torch.Generator().manual_seed(200000))))
+        self.assertEqual(random.getstate(), rng[0])
+        np.testing.assert_array_equal(np.random.get_state()[1], rng[1][1])
+        self.assertEqual(np.random.get_state()[2:], rng[1][2:])
+        self.assertTrue(torch.equal(torch.get_rng_state(), rng[2]))
+        self.evaluator.evaluate.assert_has_calls([
+            call(self.trainer.eval_env, n_episodes=2, seed_offset=100000),
+            call(self.trainer.eval_env, n_episodes=2, seed_offset=100000),
+        ])
+
+    def test_fixed_evaluation_restores_rng_on_failure(self):
+        self.trainer.eval_seed = 200000
+        states = (random.getstate(), np.random.get_state(), torch.get_rng_state())
+        def fail(*args, **kwargs):
+            self.draw_random_values()
+            raise RuntimeError("evaluation failed")
+        self.evaluator.evaluate.side_effect = fail
+        with self.assertRaisesRegex(RuntimeError, "evaluation failed"):
+            self.trainer._evaluate()
+        self.assertEqual(random.getstate(), states[0])
+        np.testing.assert_array_equal(np.random.get_state()[1], states[1][1])
+        self.assertTrue(torch.equal(torch.get_rng_state(), states[2]))
+
     def test_environment_rng_continues_across_periodic_evaluations(self):
         class RandomEnv(CounterEnv):
             def reset(self, *, seed=None, options=None):
@@ -463,7 +520,8 @@ class TrainingEntrypointEvaluationTest(unittest.TestCase):
             episodes = (cfg.training.eval_episodes if name == "train_base_policy"
                         else cfg.trainer.final_eval_episodes)
             conditions.append((int(cfg.training.seed), int(cfg.training.eval_seed),
-                               int(cfg.training.eval_env_seed), int(episodes)))
+                               int(cfg.training.eval_env_seed), int(episodes),
+                               int(cfg.training.eval_num_envs)))
         self.assertTrue(all(condition == conditions[0] for condition in conditions))
         self.assertNotEqual(conditions[0][1], conditions[0][2])
 
@@ -476,6 +534,8 @@ class TrainingEntrypointEvaluationTest(unittest.TestCase):
         cfg.logging.name = "test"
         manager, train_loader, val_loader, policy, trainer, env, evaluator, run = (
             Mock() for _ in range(8))
+        train_loader = MagicMock()
+        train_loader.__len__.return_value = 1
         manager.trans_dataloader.return_value = (train_loader, val_loader)
         train_loader.dataset.sampler.replay_buffer = {'obs': np.zeros((2, 10))}
         train_loader.dataset.sampler.indices = [(0, 2, 0, 2)]
@@ -483,8 +543,8 @@ class TrainingEntrypointEvaluationTest(unittest.TestCase):
         with patch.object(module, "ExpertDataManager", return_value=manager), \
                 patch.object(module.hydra.utils, "instantiate", return_value=policy), \
                 patch.object(module, "SupervisedPolicyTrainer", return_value=trainer), \
-                patch.object(module, "AssembleMuJoCoEnv", return_value=env), \
-                patch.object(module, "EpisodeStatsWrapper", side_effect=lambda value: value), \
+                patch.object(module.gym.vector, "AsyncVectorEnv", return_value=env) as vector_env, \
+                patch.object(module, "make_env", return_value=Mock()), \
                 patch.object(module, "BaseChunkPolicyEvaluator", return_value=evaluator), \
                 patch.object(module.wandb, "init", return_value=run), \
                 patch.object(module.torch.cuda, "is_available", return_value=False), \
@@ -492,6 +552,8 @@ class TrainingEntrypointEvaluationTest(unittest.TestCase):
             module.main.__wrapped__(cfg)
         seed.assert_has_calls([call(int(cfg.training.seed)), call(int(cfg.training.eval_seed))])
         self.assertEqual(seed.call_count, 2)
+        self.assertEqual(len(vector_env.call_args.args[0]), int(cfg.training.eval_num_envs))
+        self.assertEqual(vector_env.call_args.kwargs['autoreset_mode'], AutoresetMode.SAME_STEP)
         evaluator.evaluate.assert_called_once_with(
             env, n_episodes=int(cfg.training.eval_episodes),
             seed_offset=int(cfg.training.eval_env_seed))
@@ -539,9 +601,9 @@ class TrainingEntrypointEvaluationTest(unittest.TestCase):
                             return disc
                         return Mock()
 
-                    with patch.object(module.gym.vector, "AsyncVectorEnv", return_value=env), \
-                            patch.object(module, "make_env", return_value=lambda: eval_env), \
-                            patch.object(module.hydra.utils, "instantiate", side_effect=instantiate), \
+                    with patch.object(module.gym.vector, "AsyncVectorEnv", side_effect=[env, eval_env]) as vector_env, \
+                            patch.object(module, "make_env", return_value=Mock()), \
+                            patch.object(module.hydra.utils, "instantiate", side_effect=instantiate) as create, \
                             patch.object(module.wandb, "init", return_value=run), \
                             patch.object(module.torch.cuda, "is_available", return_value=False), \
                             patch.object(module, "set_seed") as seed:
@@ -556,7 +618,16 @@ class TrainingEntrypointEvaluationTest(unittest.TestCase):
                             call(int(cfg.training.seed)), call(int(cfg.training.eval_seed)),
                         ])
                         self.assertEqual(seed.call_count, 2)
-                        eval_env.reset.assert_called_once_with(seed=int(cfg.training.eval_env_seed))
+                        eval_env.reset.assert_not_called()
+                        self.assertEqual(vector_env.call_count, 2)
+                        self.assertEqual(len(vector_env.call_args_list[0].args[0]), int(cfg.env.num_envs))
+                        self.assertEqual(len(vector_env.call_args_list[1].args[0]), int(cfg.training.eval_num_envs))
+                        self.assertTrue(all(c.kwargs['autoreset_mode'] == AutoresetMode.SAME_STEP
+                                            for c in vector_env.call_args_list))
+                        trainer_call = next(c for c in create.call_args_list if c.args[0] is cfg.trainer)
+                        self.assertIs(trainer_call.kwargs['eval_env'], eval_env)
+                        self.assertEqual(trainer_call.kwargs['eval_seed'], int(cfg.training.eval_seed))
+                        self.assertEqual(trainer_call.kwargs['eval_env_seed'], int(cfg.training.eval_env_seed))
                         expected = [call.train(), call.seed(int(cfg.training.eval_seed))]
                         if save_model:
                             expected.append(call.load(module.MODE_DIR / "final_model"))
@@ -592,7 +663,7 @@ class TrainingEntrypointEvaluationTest(unittest.TestCase):
                 patch.object(module, "set_seed"):
             with self.assertRaisesRegex(ValueError, "缺少观测归一化统计量"):
                 module.main.__wrapped__(cfg)
-        instantiate.assert_called_once_with(cfg.base_policy)
+        instantiate.assert_called_once_with(cfg.base_policy, num_training_steps=0)
         base_policy.load_model.assert_called_once_with(module.BASE_POLICY_DIR)
         init_run.assert_not_called()
         vector_env.assert_not_called()

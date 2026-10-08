@@ -5,6 +5,7 @@ training:
   epochs: 200
   patience: 30
   eval_episodes: 30
+  eval_num_envs: 4
   eval_seed: 200000
   eval_env_seed: 100000
   batch_size: 128
