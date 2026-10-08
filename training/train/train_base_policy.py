@@ -39,6 +39,7 @@ def main(cfg: DictConfig):
     print(f"Using device: {device}")
 
     # 策略日志配置
+    LOG_DIR.mkdir(parents=True, exist_ok=True)
     wb_run: wandb.Run = wandb.init(
         dir=LOG_DIR,
         config=OmegaConf.to_container(cfg),

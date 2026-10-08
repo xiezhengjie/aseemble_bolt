@@ -1,17 +1,17 @@
 env:
-  num_envs: 4
+  num_envs: 10
   max_episode_steps: 400
 
 trainer:
   _target_: training.common.train_utils.ResidualGAILTrainer
   seed: 42
-  total_timesteps: 500000
+  total_timesteps: 2000000
   learning_starts: 5000     # 前 5000 步只用基座动作采集（基座预热），期间不做更新
   use_warmup: true          # 启用基座预热阶段；false 表示残差策略从第 0 步直接参与
   batch_size: 128
   policy_updates: 1
   target_update_interval: 2
-  eval_interval: 10000
+  eval_interval: 50000
   eval_episodes: 10
   final_eval_episodes: 30
   log_interval: 100
@@ -33,7 +33,7 @@ training:
   seed: ${trainer.seed}      # set_seed 用
   eval_env_seed: 100000
   eval_seed: 200000
-  buffer_size: 200000         # buffers.replay.capacity 用
+  buffer_size: 1000000       # buffers.replay.capacity 用
   generator_window: 50000    # buffers.generator.window_size 用
 
 base_policy:
@@ -43,7 +43,7 @@ base_policy:
   action_dim: 6
   n_action_steps: 8
   n_obs_steps: 2
-  num_inference_steps: 100
+  num_inference_steps: 10
   warmstart_timestep: 50
   eta: 0.0
 
@@ -122,7 +122,7 @@ discriminator:
 
   lr_scheduler:
     name: cosine
-    num_warmup_steps: 100000
+    num_warmup_steps: 10000
 
   smoothing: 0.05
   ent_reg_scale: 0.001
@@ -143,7 +143,7 @@ name: sac_gail_residual
 
 logging:
   project: sac_gail_residual_debug
-  resume: true
+  resume: false
   mode: online
   name: ${now:%Y.%m.%d-%H.%M.%S}_${name}
   tags: [sac, gail, residual]

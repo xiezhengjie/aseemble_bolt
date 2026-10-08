@@ -215,6 +215,148 @@ class TrainUtilsTest(unittest.TestCase):
         self.assertEqual(batch["next_states"].shape, (4, 2))
 
 
+class TrainingMetricsTest(unittest.TestCase):
+    def setUp(self):
+        self.collector = Mock()
+        self.collector.step.return_value = []
+        self.run = Mock()
+        self.logged = []
+        self.run.log.side_effect = lambda values, step: self.logged.append((dict(values), step))
+        self.trainer = OffPolicyTrainer(
+            Mock(num_envs=1), object(), Mock(), Mock(), 4,
+            collector=self.collector, learning_starts=0, log_interval=2,
+            eval_interval=1000, is_save_model=False, wb_run=self.run,
+        )
+        self.trainer._update = Mock(return_value={})
+
+    def train(self):
+        with patch("training.common.train_utils.tqdm"):
+            return self.trainer.train()
+
+    def test_sps_excludes_reset_evaluation_checkpoint_and_flush_time(self):
+        for num_envs in (1, 3):
+            for eval_steps in (3, 4):
+                with self.subTest(num_envs=num_envs, eval_steps=eval_steps):
+                    self.logged.clear()
+                    clock = [0.0]
+                    collected = [0]
+
+                    def advance(seconds):
+                        clock[0] += seconds
+
+                    def collect(**kwargs):
+                        advance(1 + collected[0] // 4)
+                        collected[0] += 1
+                        return []
+
+                    def log(values, step):
+                        self.logged.append((dict(values), step))
+                        advance(50)
+
+                    self.trainer.global_step = 0
+                    self.trainer._last_log_step = -1
+                    self.trainer.best_success = -float("inf")
+                    self.trainer.env.num_envs = num_envs
+                    self.trainer.total_timesteps = 12 * num_envs
+                    self.trainer.log_interval = 4 * num_envs
+                    self.trainer.eval_interval = eval_steps * num_envs
+                    self.collector.reset.side_effect = lambda *args, **kwargs: advance(100)
+                    self.collector.step.side_effect = collect
+                    self.trainer._update.side_effect = lambda *args: advance(0.5) or {}
+                    self.trainer._save_checkpoint = Mock(side_effect=lambda *args: advance(40))
+                    self.trainer.evaluator = Mock()
+                    stats = dict(success_rate=1.0, return_mean=0.0,
+                                 return_std=0.0, peak_force_mean=0.0)
+                    self.trainer.evaluator.evaluate.side_effect = (
+                        lambda *args, **kwargs: advance(200) or stats)
+                    self.run.log.side_effect = log
+                    with patch("training.common.train_utils.time.perf_counter",
+                               side_effect=lambda: clock[0]), \
+                            patch("training.common.train_utils.tqdm") as progress:
+                        progress.return_value.__enter__.return_value.update.side_effect = (
+                            lambda *args: advance(0.25))
+                        self.trainer.train()
+
+                    sps = [(values["charts/SPS"], step) for values, step in self.logged
+                           if "charts/SPS" in values]
+                    self.assertEqual([step for _, step in sps],
+                                     [4 * num_envs, 8 * num_envs, 12 * num_envs])
+                    np.testing.assert_allclose([value for value, _ in sps],
+                                               [num_envs / duration for duration in (1.75, 2.75, 3.75)])
+                    self.assertEqual(self.trainer.evaluator.evaluate.call_count, 12 // eval_steps)
+                    self.trainer._save_checkpoint.assert_has_calls([
+                        call("best_success_model", stats), call("final_model", {}),
+                    ])
+
+    def test_sps_uses_actual_transition_count_when_intervals_are_crossed(self):
+        self.trainer.env.num_envs = 3
+        self.trainer.total_timesteps = 15
+        self.trainer.log_interval = 5
+        with patch("training.common.train_utils.time.perf_counter",
+                   side_effect=range(10)):
+            self.train()
+        sps = [(values["charts/SPS"], step) for values, step in self.logged
+               if "charts/SPS" in values]
+        self.assertEqual(sps, [(3.0, 6), (3.0, 12), (3.0, 15)])
+
+    def test_no_completed_episodes_logs_zero_counts_without_success_rate(self):
+        self.train()
+        self.assertEqual([step for _, step in self.logged], [2, 4])
+        for values, _ in self.logged:
+            self.assertEqual(values["charts/completed_episodes"], 0)
+            self.assertEqual(values["charts/success_count"], 0)
+            self.assertNotIn("charts/success_rate_50ep", values)
+            self.assertNotIn("charts/episode_success", values)
+            self.assertNotIn("charts/success", values)
+
+    def test_episode_success_and_counts_preserve_batch_and_rolling_semantics(self):
+        self.trainer.env.num_envs = 2
+        self.trainer.total_timesteps = 8
+        self.trainer.log_interval = 4
+        self.collector.step.side_effect = [
+            [],
+            [dict(episodic_return=2.0, episodic_length=2, success=True),
+             dict(episodic_return=4.0, episodic_length=2, success=False)],
+            [dict(episodic_return=6.0, episodic_length=3, success=True)],
+            [],
+        ]
+        np.testing.assert_array_equal(self.train(), [2, 4, 6])
+        self.assertEqual([step for _, step in self.logged], [4, 6, 8])
+        first, second, third = [values for values, _ in self.logged]
+        self.assertEqual(first["charts/episode_success"], 0.5)
+        self.assertEqual(first["charts/episodic_return"], 3.0)
+        self.assertEqual(first["charts/episodic_length"], 2.0)
+        self.assertEqual(first["charts/success_rate_50ep"], 0.5)
+        self.assertEqual(first["charts/completed_episodes"], 2)
+        self.assertEqual(first["charts/success_count"], 1)
+        self.assertEqual(second["charts/episode_success"], 1.0)
+        self.assertEqual(second["charts/success_rate_50ep"], 2 / 3)
+        self.assertEqual(second["charts/completed_episodes"], 3)
+        self.assertEqual(second["charts/success_count"], 2)
+        self.assertEqual(third["charts/completed_episodes"], 3)
+        self.assertEqual(third["charts/success_count"], 2)
+        self.assertNotIn("charts/episode_success", third)
+        self.assertTrue(all("charts/success" not in values for values, _ in self.logged))
+
+    def test_success_count_tracks_only_the_last_50_completed_episodes(self):
+        successes = [True, True] + [False, True] * 24 + [False, False]
+        self.trainer.total_timesteps = len(successes)
+        self.trainer.log_interval = 10
+        self.collector.step.side_effect = [
+            [dict(episodic_return=1.0, success=success)] for success in successes]
+        self.train()
+        self.assertEqual(len(self.logged), len(successes))
+        for completed, (values, _) in enumerate(self.logged, start=1):
+            window = successes[max(0, completed - 50):completed]
+            self.assertEqual(values["charts/completed_episodes"], completed)
+            self.assertEqual(values["charts/success_count"], sum(window))
+            self.assertEqual(values["charts/success_rate_50ep"], sum(window) / len(window))
+        final = self.logged[-1][0]
+        self.assertEqual(final["charts/completed_episodes"], 52)
+        self.assertEqual(final["charts/success_count"], 24)
+        self.assertEqual(final["charts/success_rate_50ep"], 24 / 50)
+
+
 class EvaluationSeedTest(unittest.TestCase):
     def setUp(self):
         self.addCleanup(random.setstate, random.getstate())

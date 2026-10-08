@@ -290,11 +290,12 @@ class OffPolicyTrainer:
     def train(self) -> np.ndarray:
         """总步数向上取整到 num_envs；环境由调用方负责关闭。"""
         next_eval, next_log = self.eval_interval, self.log_interval
-        last_time, last_step = time.perf_counter(), 0
+        window_elapsed, last_step = 0.0, self.global_step
         try:
             self.collector.reset(self.seed, options=self.reset_options)
             with tqdm(total=self.total_timesteps, desc=type(self).__name__, dynamic_ncols=True, ascii=True, mininterval=0.5) as bar:
                 while self.global_step < self.total_timesteps:
+                    step_started = time.perf_counter()
                     warmup = self.global_step < self.learning_starts and self.use_warmup
                     episodes = self.collector.step(warmup=warmup)
                     self.global_step += self.env.num_envs
@@ -309,8 +310,9 @@ class OffPolicyTrainer:
                         self.return_list.append(episode["episodic_return"])
                         self.success_history.append(episode["success"])
                     for key in episodes[0] if episodes else ():
+                        metric = "episode_success" if key == "success" else key
                         self._log({
-                            f"charts/{key}": np.mean([
+                            f"charts/{metric}": np.mean([
                                 episode[key] for episode in episodes if key in episode
                             ])
                         })
@@ -319,13 +321,19 @@ class OffPolicyTrainer:
                             "charts/avg_episodic_return": np.mean(self.return_list[-10:]),
                             "charts/success_rate_50ep": np.mean(self.success_history),
                         })
+                    if episodes or should_log:
+                        self._log({
+                            "charts/completed_episodes": len(self.return_list),
+                            "charts/success_count": sum(self.success_history),
+                        })
                     bar.update(self.env.num_envs)
+                    # Evaluation and log flush must not enter the training throughput window.
+                    window_elapsed += time.perf_counter() - step_started
 
                     if should_log:
-                        now = time.perf_counter()
-                        self._log({"charts/SPS": (self.global_step - last_step) / (now - last_time)})
+                        self._log({"charts/SPS": (self.global_step - last_step) / window_elapsed})
                         self._log({f"losses/{key}": value for key, value in info.items()})
-                        last_time, last_step = now, self.global_step
+                        window_elapsed, last_step = 0.0, self.global_step
                         next_log = (
                             self.global_step // self.log_interval + 1
                         ) * self.log_interval
