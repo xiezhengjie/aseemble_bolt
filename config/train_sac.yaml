@@ -2,6 +2,11 @@ env:
   num_envs: 8
   max_episode_steps: 400
 
+observation_normalization:
+  enabled: false
+  update_stats: true  # 只在训练环境 reset/step 时更新，评估冻结。
+  clip: 50.0
+
 # Trainer 是这些超参的主定义方（字面值在此）；
 # training / policy / buffers 等通过 ${trainer.xxx} 或 ${training.xxx} 引用，避免重复写值。
 trainer:

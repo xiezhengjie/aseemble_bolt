@@ -12,15 +12,17 @@ os.environ.setdefault("CUBLAS_WORKSPACE_CONFIG", ":4096:8")
 
 
 import hydra
+import numpy as np
 import torch
 import wandb
 import logging
 import gymnasium as gym
 from gymnasium.vector import AutoresetMode
 from omegaconf import DictConfig, OmegaConf
-from training.common.rl_utils import make_env, set_seed
+from training.common.rl_utils import make_env, set_seed, RunningMeanStd
 from training.policy.discriminator_policy import Discriminator
 from training.policy.sac_policy import SACPolicy
+from training.common.observation_wrapper import ObsNormalizeVectorWrapper
 from training.common.train_utils import GAILTrainer
 
 OmegaConf.register_new_resolver("eval", eval, replace=True)
@@ -54,9 +56,21 @@ def main(cfg: DictConfig):
         # 环境构建
         n_envs = int(cfg.env.num_envs)
         max_episode_steps = int(cfg.env.max_episode_steps)
+        absorbing_state = bool(cfg.env.get("absorbing_state", False))
         env = gym.vector.AsyncVectorEnv(
             [make_env(str(XML_PATH), str(URDF_PATH), max_episode_steps) for _ in range(n_envs)],
             autoreset_mode=AutoresetMode.SAME_STEP,
+        )
+        norm_cfg = cfg.observation_normalization
+        obs_normalizer = None
+        if norm_cfg.enabled:
+            raw_obs_dim = env.single_observation_space.shape[0]
+            obs_normalizer = RunningMeanStd(shape=(raw_obs_dim,), clip=float(norm_cfg.clip))
+            with np.load(DATA_PATH) as expert_data:
+                obs_normalizer.update(expert_data["states"][:, :raw_obs_dim])
+        env = ObsNormalizeVectorWrapper(
+            env, normalizer=obs_normalizer, update_stats=bool(norm_cfg.update_stats),
+            absorbing_state=absorbing_state,
         )
         stack.callback(env.close)
         eval_episodes = max(
@@ -70,6 +84,9 @@ def main(cfg: DictConfig):
             [make_env(str(XML_PATH), str(URDF_PATH), max_episode_steps)
              for _ in range(eval_num_envs)],
             autoreset_mode=AutoresetMode.SAME_STEP,
+        )
+        eval_env = ObsNormalizeVectorWrapper(
+            eval_env, normalizer=obs_normalizer, absorbing_state=absorbing_state,
         )
         stack.callback(eval_env.close)
         env.single_action_space.seed(seed)
@@ -85,6 +102,7 @@ def main(cfg: DictConfig):
         )
         agent: SACPolicy = hydra.utils.instantiate(
             cfg.policy,
+            absorbing_state=absorbing_state,
             state_dim=state_dim,
             action_dim=action_dim,
             action_space=env.single_action_space,
@@ -99,7 +117,10 @@ def main(cfg: DictConfig):
 
         # 数据缓冲区构建
         expert_manager = hydra.utils.instantiate(cfg.buffers.expert)
-        expert_manager.load_data(DATA_PATH, raw_obs_dim=state_dim)
+        expert_manager.load_data(
+            DATA_PATH, raw_obs_dim=state_dim - int(absorbing_state),
+            absorbing_state=absorbing_state, obs_normalizer=obs_normalizer,
+        )
         expert_buffer = expert_manager.buffer
         replay = hydra.utils.instantiate(cfg.buffers.replay)
         generator = hydra.utils.instantiate(cfg.buffers.generator, buffer_r=replay)
@@ -107,6 +128,7 @@ def main(cfg: DictConfig):
         # 训练器创建
         trainer: GAILTrainer = hydra.utils.instantiate(
             cfg.trainer,
+            absorbing_state=absorbing_state,
             env=env,
             eval_env=eval_env,
             agent=agent,
@@ -116,6 +138,7 @@ def main(cfg: DictConfig):
             generator_buffer=generator,
             wb_run=wb_run,
             save_model_dir=MODE_DIR,
+            obs_normalizer=obs_normalizer,
             eval_seed=int(cfg.training.eval_seed),
             eval_env_seed=int(cfg.training.eval_env_seed),
         )
@@ -128,6 +151,7 @@ def main(cfg: DictConfig):
         set_seed(eval_seed)
         if trainer.is_save_model:
             agent.load_model(MODE_DIR / "final_model")
+            eval_env.normalizer = ObsNormalizeVectorWrapper.load_normalizer(MODE_DIR / "final_model", obs_normalizer)
         metrics = trainer.evaluator.evaluate(
             eval_env,
             n_episodes=trainer.final_eval_episodes,

@@ -298,12 +298,21 @@ class ResidualEvaluator(BaseChunkPolicyEvaluator):
         self.residual_agent = residual_agent
         self.residual_scale = float(residual_scale)
 
+    def _vector_reset(self, obs, env):
+        return super()._vector_reset(obs[..., :self.agent.obs_dim], env)
+
+    def _vector_step(self, state, obs, next_obs, active, ended):
+        return super()._vector_step(
+            state, obs[..., :self.agent.obs_dim],
+            next_obs[..., :self.agent.obs_dim], active, ended,
+        )
+
     def _episode(self, env, seed):
         """评估单个episode。"""
         ep_peak_force = 0.0
         done = False
         obs, _ = env.reset(seed=seed)
-        history = [np.asarray(obs, dtype=np.float32)] * self.obs_horizon
+        history = [np.asarray(obs, dtype=np.float32)[..., :self.agent.obs_dim]] * self.obs_horizon
         self.agent.reset()
         action_plan = None
         plan_index = 0
@@ -320,7 +329,9 @@ class ResidualEvaluator(BaseChunkPolicyEvaluator):
                              env.action_space.low, env.action_space.high)
             plan_index += 1
             obs, _, terminated, truncated, info = env.step(action)
-            history = (history + [np.asarray(obs, dtype=np.float32)])[-self.obs_horizon:]
+            history = (history + [
+                np.asarray(obs, dtype=np.float32)[..., :self.agent.obs_dim],
+            ])[-self.obs_horizon:]
             done = bool(terminated or truncated)
             force = np.asarray(info["force"], dtype=np.float32).reshape(-1)
             ep_peak_force = max(ep_peak_force, float(np.linalg.norm(force[:6])))

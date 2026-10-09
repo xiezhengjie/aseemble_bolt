@@ -23,7 +23,8 @@ class SACPolicy(BasePolicy):
                  alpha_min: float|None = None,
                  target_entropy: float|None = None,
                  actor_grad_clip_norm=1.0,
-                 critic_grad_clip_norm=5.0):
+                 critic_grad_clip_norm=5.0,
+                 absorbing_state=False):
         """
         optimizer: 各网络优化器超参（actor / critic / alpha），含 lr、betas、eps、weight_decay
         lr_scheduler: 学习率调度器配置（name、num_warmup_steps）
@@ -38,9 +39,11 @@ class SACPolicy(BasePolicy):
         super().__init__()
         self.use_sde = use_sde
         self.action_space = action_space
-        self.state_dim = state_dim
+        self.state_dim = int(state_dim)
         self.hidden_dim = hidden_dim
-        self.action_dim = action_dim
+        self.action_dim = int(action_dim)
+        self.absorbing_state = bool(absorbing_state)
+        self.physical_obs_dim = self.state_dim - int(self.absorbing_state)
         self.clip_mean = float(clip_mean)
         self.log_std_init = float(log_std_init)
         self.actor_grad_clip_norm = float(actor_grad_clip_norm)
@@ -119,45 +122,44 @@ class SACPolicy(BasePolicy):
         if self.use_sde:
             self.actor.reset_noise(batch_size)
 
-    def _obs_to_batch(self, state):
-        """整理观测为网络输入，返回 (tensor[B,...], return_single)。"""
+    def predict_action(self, state, deterministic=False):
+        """预测策略动作。"""
         states = np.asarray(state, dtype=np.float32)
-        if states.ndim == 1:
-            states = states[np.newaxis, :]
-            return_single = True
-        else:
-            return_single = False
-        t = torch.as_tensor(states, dtype=torch.float32, device=self.device)
-        return t, return_single
-
-    def _residual_obs(self, states):
-        return states
-
-    def predict_action(self, state, deterministic=False, base_only=False):
-        """取普通 SAC 的环境动作。``base_only`` 仅由残差子类实现。"""
-        if base_only:
-            raise ValueError("普通 SACAgent 不支持 base_only")
-        states, return_single = self._obs_to_batch(state)
-        states = self.normalize_obs(states)
+        return_single = states.ndim == 1
+        if return_single:
+            states = states[None, :]
+        states = torch.as_tensor(states, dtype=torch.float32, device=self.device)
         self.actor.eval()
         with torch.no_grad():
             executed, _ = self.actor(states, deterministic=deterministic)
+            if self.absorbing_state:
+                executed = torch.where(
+                    (states[..., self.physical_obs_dim] > 0.5)[:, None],
+                    torch.zeros_like(executed), executed,
+                )
         self.actor.train()
         executed_np = np.array(executed.detach().cpu().numpy(), dtype=np.float32, copy=True)
         if return_single:
             executed_np = executed_np[0]
         return executed_np
 
-    def calc_target(self, rewards, next_states, dones):
-        """ 计算目标Q值 """
-        next_states = self.normalize_obs(next_states)
-        with torch.no_grad():
-            next_actions, next_log_prob = self.actor(next_states)
-            q1_value = self.target_critic_1(next_states, next_actions)
-            q2_value = self.target_critic_2(next_states, next_actions)
-            next_q_values = torch.min(q1_value, q2_value) - self.alpha * next_log_prob
-        td_target = rewards.flatten() + self.gamma * (1 - dones.flatten()) * next_q_values.view(-1)
-        return td_target
+    def _absorbing_mask(self, states):
+        return states[..., self.physical_obs_dim] > 0.5
+
+    @torch.no_grad()
+    def _calc_target(self, rewards, next_states, dones, alpha):
+        next_actions, next_log_prob = self.actor(next_states)
+        if self.absorbing_state:
+            absorbing = self._absorbing_mask(next_states)[:, None]
+            next_actions = torch.where(absorbing, torch.zeros_like(next_actions), next_actions)
+            next_log_prob = torch.where(absorbing, torch.zeros_like(next_log_prob), next_log_prob)
+        q1_value = self.target_critic_1(next_states, next_actions)
+        q2_value = self.target_critic_2(next_states, next_actions)
+        next_q_values = (torch.min(q1_value, q2_value) - alpha * next_log_prob).flatten()
+        # DAC 将真正终止接入吸收态；吸收自环也持续 bootstrap。
+        if not self.absorbing_state:
+            next_q_values = (1 - dones.flatten()) * next_q_values
+        return rewards.flatten() + self.gamma * next_q_values
 
     def soft_update(self, net, target_net):
         for param_target, param in zip(target_net.parameters(), net.parameters()):
@@ -178,10 +180,10 @@ class SACPolicy(BasePolicy):
                 t = t.to(self.device)
             return t.view(-1, 1) if extra_view else t
 
-        states = self.normalize_obs(_to_dev(transition_dict['states']))
+        states = _to_dev(transition_dict['states'])
         actions = _to_dev(transition_dict['actions'])
         rewards = _to_dev(transition_dict['rewards'], extra_view=True)
-        next_states = self.normalize_obs(_to_dev(transition_dict['next_states']))
+        next_states = _to_dev(transition_dict['next_states'])
         dones = _to_dev(transition_dict['dones'], extra_view=True)
 
         # SB3 SAC.train：每个梯度步 reset_noise()（默认 batch=1，整 minibatch 共用一份 E）。
@@ -196,28 +198,30 @@ class SACPolicy(BasePolicy):
         actions_pi, log_prob = self.actor(obs)
         log_prob = log_prob.reshape(-1, 1)
 
+        active = ~self._absorbing_mask(states) if self.absorbing_state else torch.ones(
+            states.shape[0], dtype=torch.bool, device=self.device,
+        )
+        has_active = bool(active.any())
+
         # 更新 alpha（计算用 tensor，避免每步 .item() 同步）
         if self.autotune:
-            # 先取出 pre-step α，给 target Q / actor；再更新 log_alpha。
             alpha_t = self.log_alpha.exp().detach()
-            alpha_loss = -(self.log_alpha * (log_prob + self.target_entropy).detach()).mean()
-            self.log_alpha_optimizer.zero_grad()
-            alpha_loss.backward()
-            self.log_alpha_optimizer.step()
-            self.alpha_lr_scheduler.step()
-            if self.alpha_min is not None:
-                with torch.no_grad():
-                    self.log_alpha.clamp_(min=float(np.log(self.alpha_min)))
+            if has_active:
+                alpha_loss = -(self.log_alpha * (log_prob[active] + self.target_entropy).detach()).mean()
+                self.log_alpha_optimizer.zero_grad()
+                alpha_loss.backward()
+                self.log_alpha_optimizer.step()
+                self.alpha_lr_scheduler.step()
+                if self.alpha_min is not None:
+                    with torch.no_grad():
+                        self.log_alpha.clamp_(min=float(np.log(self.alpha_min)))
+            else:
+                alpha_loss = torch.zeros((), device=self.device)
         else:
-            alpha_t = self.alpha 
+            alpha_t = self.alpha
 
         # 计算 target Q（使用 pre-step alpha）
-        with torch.no_grad():
-            next_actions, next_log_prob = self.actor(next_obs)
-            q1_value = self.target_critic_1(next_obs, next_actions)
-            q2_value = self.target_critic_2(next_obs, next_actions)
-            next_q_values = torch.min(q1_value, q2_value) - alpha_t * next_log_prob
-        td_target = rewards.flatten() + self.gamma * (1 - dones.flatten()) * next_q_values.view(-1)
+        td_target = self._calc_target(rewards, next_obs, dones, alpha_t)
 
         # 计算 critic loss
         critic_1_values = self.critic_1(obs, actions).view(-1)
@@ -236,15 +240,18 @@ class SACPolicy(BasePolicy):
 
         q1_pi = self.critic_1(obs, actions_pi)
         q2_pi = self.critic_2(obs, actions_pi)
-        actor_loss = (alpha_t * log_prob - torch.min(q1_pi, q2_pi)).mean()
-      
-        self.actor_optimizer.zero_grad()
-        actor_loss.backward()
-        gn_actor = torch.nn.utils.clip_grad_norm_(
-            self.actor.parameters(), self.actor_grad_clip_norm,
-        )
-        self.actor_optimizer.step()
-        self.actor_lr_scheduler.step()
+        if has_active:
+            actor_loss = (alpha_t * log_prob[active] - torch.min(q1_pi, q2_pi)[active]).mean()
+            self.actor_optimizer.zero_grad()
+            actor_loss.backward()
+            gn_actor = torch.nn.utils.clip_grad_norm_(
+                self.actor.parameters(), self.actor_grad_clip_norm,
+            )
+            self.actor_optimizer.step()
+            self.actor_lr_scheduler.step()
+        else:
+            actor_loss = torch.zeros((), device=self.device)
+            gn_actor = torch.zeros((), device=self.device)
 
         if log_info:
             if self.autotune:
@@ -265,7 +272,6 @@ class SACPolicy(BasePolicy):
     def load_policy(self, model_dir):
         _model_dir = Path(model_dir)
         self.actor.load_state_dict(load_state_dict(_model_dir, "policy_net", map_location=self.device))
-        self._load_obs_normalizer(_model_dir)
 
     def load_model(self, model_dir):
         _model_dir = Path(model_dir)
@@ -279,10 +285,10 @@ class SACPolicy(BasePolicy):
         _model_dir = Path(model_dir)
         _model_dir.mkdir(parents=True, exist_ok=True)
         save_state_dict(self.actor.state_dict(), _model_dir, "policy_net")
-        self._save_obs_normalizer(_model_dir)
         save_state_dict(self.critic_1.state_dict(), _model_dir, "qvalue_net1")
         save_state_dict(self.critic_2.state_dict(), _model_dir, "qvalue_net2")
         cfg = self.actor.export_cfg()
+        cfg.update(absorbing_state=self.absorbing_state, physical_obs_dim=self.physical_obs_dim)
         save_policy_cfg(cfg, _model_dir)
 
 
@@ -292,7 +298,4 @@ class ResidualSACPolicy(SACPolicy):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.obs_dim = self.state_dim - self.action_dim
-
-    def normalize_obs(self, obs):
-        states = super().normalize_obs(obs[..., :self.obs_dim])
-        return torch.cat([states, obs[..., self.obs_dim:]], dim=-1)
+        self.physical_obs_dim = self.obs_dim - int(self.absorbing_state)

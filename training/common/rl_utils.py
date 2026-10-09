@@ -85,6 +85,30 @@ def layer_init(layer, nonlinearity="ReLU", std=np.sqrt(2), bias_const=0.0):
 
     return layer
 
+def discriminator_weights_init(discriminator, last_layer_scale=0.1):
+    """
+    对判别器进行初始化，最后一层的权重和偏置进行缩放。
+    """
+    for m in discriminator.modules():
+        if isinstance(m, nn.Linear):
+            nn.init.kaiming_uniform_(m.weight, a=0, mode='fan_in', nonlinearity='linear') # 等价与lecun_uniform
+            if m.bias is not None:
+                nn.init.zeros_(m.bias)
+
+    last_layer = None
+    for m in discriminator.modules():
+        if isinstance(m, nn.Linear):
+            last_layer = m  # 不断覆盖，最终留下的是最后一层
+
+    if last_layer is not None:
+        with torch.no_grad():  # 必须开启 no_grad，初始化不需要计算梯度
+            # 权重乘以缩放系数
+            last_layer.weight.data *= last_layer_scale
+            
+            # 如果最后一层有偏置（通常初始化为0），也一起缩放（0乘以任何数还是0，但为了严谨保持一致）
+            if last_layer.bias is not None:
+                last_layer.bias.data *= last_layer_scale
+
 def find_project_root():
     current = Path(__file__).resolve().parent
     for parent in [current] + list(current.parents):
@@ -93,7 +117,8 @@ def find_project_root():
     raise FileNotFoundError("项目根目录缺少 requirements.txt")
 
 def wrap_frame_stack(env, frame_stack, padding_type="reset"):
-    """把单帧观测叠成 (T, *obs_shape)，给 GRU 用。
+    """
+    把单帧观测叠成 (T, *obs_shape)，给 GRU 用。
 
     episode 开始时默认重复首帧（``padding_type='reset'``）。
     """

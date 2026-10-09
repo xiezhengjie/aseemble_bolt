@@ -18,6 +18,7 @@ import gymnasium as gym
 from gymnasium.vector import AutoresetMode
 from omegaconf import DictConfig, OmegaConf
 from training.common.rl_utils import make_env, set_seed
+from training.common.observation_wrapper import ObsNormalizeVectorWrapper
 from training.common.train_utils import ResidualGAILTrainer
 from training.policy.sac_policy import ResidualSACPolicy
 from training.policy.discriminator_policy import Discriminator
@@ -47,7 +48,8 @@ def main(cfg: DictConfig):
     # 基座不参与更新，优化器与调度器仅满足构造签名，num_training_steps 传 0。
     base_policy: DiffusionPolicy = hydra.utils.instantiate(cfg.base_policy, num_training_steps=0).to(device)
     base_policy.load_model(BASE_POLICY_DIR)
-    if base_policy.obs_normalizer is None:
+    obs_normalizer = ObsNormalizeVectorWrapper.load_normalizer(BASE_POLICY_DIR)
+    if obs_normalizer is None:
         raise ValueError(
             f"基座模型缺少观测归一化统计量：{BASE_POLICY_DIR}。"
             "请使用 train_base_policy 保存的权重与 obs_normalizer 配套 checkpoint。"
@@ -68,9 +70,13 @@ def main(cfg: DictConfig):
         # 环境构建
         n_envs = int(cfg.env.num_envs)
         max_episode_steps = int(cfg.env.max_episode_steps)
+        absorbing_state = bool(cfg.env.get("absorbing_state", False))
         env = gym.vector.AsyncVectorEnv(
             [make_env(str(XML_PATH), str(URDF_PATH), max_episode_steps) for _ in range(n_envs)],
             autoreset_mode=AutoresetMode.SAME_STEP,
+        )
+        env = ObsNormalizeVectorWrapper(
+            env, normalizer=obs_normalizer, absorbing_state=absorbing_state,
         )
         stack.callback(env.close)
         eval_episodes = max(
@@ -84,6 +90,9 @@ def main(cfg: DictConfig):
             [make_env(str(XML_PATH), str(URDF_PATH), max_episode_steps)
              for _ in range(eval_num_envs)],
             autoreset_mode=AutoresetMode.SAME_STEP,
+        )
+        eval_env = ObsNormalizeVectorWrapper(
+            eval_env, normalizer=obs_normalizer, absorbing_state=absorbing_state,
         )
         stack.callback(eval_env.close)
         env.single_action_space.seed(seed)
@@ -102,6 +111,7 @@ def main(cfg: DictConfig):
         )
         agent: ResidualSACPolicy = hydra.utils.instantiate(
             cfg.policy,
+            absorbing_state=absorbing_state,
             state_dim=state_dim + action_dim,
             action_dim=action_dim,
             action_space=residual_space,
@@ -114,12 +124,12 @@ def main(cfg: DictConfig):
             num_training_steps=update_steps * int(cfg.trainer.disc_updates),
         ).to(device)
 
-        agent.set_obs_normalizer(base_policy.obs_normalizer)
-        disc.set_obs_normalizer(base_policy.obs_normalizer)
-
         # 数据缓冲区构建
         expert_manager = hydra.utils.instantiate(cfg.buffers.expert)
-        expert_manager.load_data(DATA_PATH, raw_obs_dim=state_dim)
+        expert_manager.load_data(
+            DATA_PATH, raw_obs_dim=state_dim - int(absorbing_state),
+            absorbing_state=absorbing_state, obs_normalizer=obs_normalizer,
+        )
         expert_buffer = expert_manager.buffer
         replay = hydra.utils.instantiate(cfg.buffers.replay)
         generator = hydra.utils.instantiate(cfg.buffers.generator, buffer_r=replay)
@@ -127,6 +137,7 @@ def main(cfg: DictConfig):
         # 训练器创建
         trainer: ResidualGAILTrainer = hydra.utils.instantiate(
             cfg.trainer,
+            absorbing_state=absorbing_state,
             env=env,
             eval_env=eval_env,
             base_agent=base_policy,
@@ -137,6 +148,7 @@ def main(cfg: DictConfig):
             generator_buffer=generator,
             wb_run=wb_run,
             save_model_dir=MODE_DIR,
+            obs_normalizer=obs_normalizer,
             eval_seed=int(cfg.training.eval_seed),
             eval_env_seed=int(cfg.training.eval_env_seed),
         )
@@ -149,6 +161,7 @@ def main(cfg: DictConfig):
         set_seed(eval_seed)
         if trainer.is_save_model:
             agent.load_model(MODE_DIR / "final_model")
+            eval_env.normalizer = ObsNormalizeVectorWrapper.load_normalizer(MODE_DIR / "final_model", obs_normalizer)
         metrics = trainer.evaluator.evaluate(
             eval_env,
             n_episodes=trainer.final_eval_episodes,

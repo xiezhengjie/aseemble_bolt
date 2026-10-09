@@ -1,6 +1,12 @@
 env:
   num_envs: 8
   max_episode_steps: 400
+  absorbing_state: false     # DAC 吸收态默认关闭；每个 terminal 向同一 replay 加一条自环。
+
+observation_normalization:
+  enabled: true      # 用专家物理观测拟合初始统计。
+  update_stats: false  # true 时继续用训练环境新帧更新；评估始终冻结。
+  clip: 50.0
 
 trainer:
   _target_: training.common.train_utils.GAILTrainer
@@ -85,6 +91,9 @@ discriminator:
   dropout: 0.1
   ent_reg_scale: 0.001
   grad_clip_norm: 1.0
+  gradient_penalty: false    # 判别器梯度惩罚，默认关闭。
+  gradient_penalty_lambda: 1.0  # 梯度惩罚权重。
+  gradient_penalty_k: 0.0    # 梯度范数目标。
 
 buffers:
   expert:

@@ -10,7 +10,6 @@ from diffusers.schedulers.scheduling_ddim import DDIMScheduler
 from training.policy.base_policy import BasePolicy
 from training.model.base.conditional_unet1d import ConditionalUnet1D
 from training.common.checkpoint import load_state_dict, save_state_dict
-from training.common.rl_utils import RunningMeanStd
 
 
 class DiffusionPolicy(BasePolicy):
@@ -46,7 +45,6 @@ class DiffusionPolicy(BasePolicy):
         self.n_action_steps = n_action_steps
         self.n_obs_steps = n_obs_steps
         self.kwargs = kwargs
-        self.obs_normalizer = None
 
         self.optimizer = torch.optim.AdamW(
             self.model.parameters(),
@@ -66,12 +64,6 @@ class DiffusionPolicy(BasePolicy):
         if num_inference_steps is None:
             num_inference_steps = noise_scheduler.config.num_train_timesteps
         self.num_inference_steps = num_inference_steps
-
-    def fit_obs_normalizer(self, obs):
-        """仅用训练集原始帧拟合状态统计量，训练和推理期间保持固定。"""
-        self.obs_normalizer = RunningMeanStd(shape=(self.obs_dim,))
-        self.obs_normalizer.update(obs)
-        self.reset()
 
     def reset(self):
         """新 episode 开始前清除上一回合的动作先验。"""
@@ -102,9 +94,13 @@ class DiffusionPolicy(BasePolicy):
                 or self.prev_naction.device != condition_data.device
                 or self.prev_naction.dtype != condition_data.dtype):
             self.prev_naction = torch.zeros_like(condition_data)
-        scheduler.set_timesteps(self.num_inference_steps, device=condition_data.device)
-        timesteps = torch.full((condition_data.shape[0],), self.warmstart_timestep,
-                               device=condition_data.device, dtype=torch.long)
+
+        scheduler.set_timesteps(self.num_inference_steps, 
+                                device=condition_data.device)
+        timesteps = torch.full((condition_data.shape[0],), 
+                               self.warmstart_timestep,
+                               device=condition_data.device, 
+                               dtype=torch.long)
         trajectory = scheduler.add_noise(self.prev_naction, noise, timesteps)
 
         for t in scheduler.timesteps:
@@ -121,7 +117,6 @@ class DiffusionPolicy(BasePolicy):
 
         # 结束时再写回一次
         trajectory[condition_mask] = condition_data[condition_mask]
-        # 与参考实现一致：左移已执行的步数，未覆盖的尾部保持原先验值。
         remaining = self.horizon - self.n_action_steps
         self.prev_naction[:, :remaining] = trajectory[:, self.n_action_steps:].detach()
         return trajectory
@@ -133,7 +128,6 @@ class DiffusionPolicy(BasePolicy):
         assert 'past_action' not in obs_dict, "past_action 作为条件尚未实现"
 
         obs = obs_dict["obs"].to(device=self.device, dtype=self.dtype)
-        obs = self.normalize_obs(obs)
         batch_size, obs_steps, obs_dim = obs.shape
 
         global_cond = obs[:, :self.n_obs_steps].reshape(batch_size, -1)
@@ -178,7 +172,6 @@ class DiffusionPolicy(BasePolicy):
 
         obs = batch['obs']          # (B, To, obs_dim)
         action = batch['action']    # (B, Ta, action_dim)
-        obs = self.normalize_obs(obs)
 
         global_cond = None
         trajectory = action
@@ -227,21 +220,10 @@ class DiffusionPolicy(BasePolicy):
         return loss.detach()
 
     # ── 一轮训练 / 验证 ─────────────────────────────────────────────
-    @staticmethod
-    def _batches(loader_or_obs, action, batch_size, shuffle=False, drop_last=False):
-        if action is None:
-            yield from loader_or_obs
-        else:
-            # 保留旧的直接传入 obs/action 张量接口。
-            from training.common.buffer_utils import TensorBatchLoader
-            for obs_batch, action_batch in TensorBatchLoader(
-                    loader_or_obs, action, batch_size, shuffle, drop_last):
-                yield {'obs': obs_batch, 'action': action_batch}
-
-    def fit_epoch(self, loader_or_obs, action=None, batch_size=256, drop_last=False) -> float:
+    def fit_epoch(self, loader) -> float:
         total = torch.zeros((), device=self.device)
         count = 0
-        for batch in self._batches(loader_or_obs, action, batch_size, True, drop_last):
+        for batch in loader:
             loss = self.update(batch)
             n = len(batch['obs'])
             total = total + loss * n
@@ -249,12 +231,12 @@ class DiffusionPolicy(BasePolicy):
         return float(total / count)
 
     @torch.no_grad()
-    def eval_epoch(self, loader_or_obs, action=None, batch_size=1024) -> float:
+    def eval_epoch(self, loader) -> float:
         """验证仍会重新采样噪声和 timestep，loss 有随机性。"""
         self.model.eval()
         total = torch.zeros((), device=self.device)
         count = 0
-        for batch in self._batches(loader_or_obs, action, batch_size):
+        for batch in loader:
             batch = {k: v.to(self.device) for k, v in batch.items()}
             loss = self.compute_loss(batch)
             n = len(batch['obs'])
@@ -267,9 +249,7 @@ class DiffusionPolicy(BasePolicy):
         self.model.load_state_dict(load_state_dict(
             Path(model_dir), "policy_net", map_location=self.device,
         ))
-        self._load_obs_normalizer(model_dir)
         self.reset()
 
     def save_model(self, model_dir):
         save_state_dict(self.model.state_dict(), model_dir, "policy_net")
-        self._save_obs_normalizer(model_dir)

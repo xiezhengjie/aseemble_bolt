@@ -1,35 +1,10 @@
 from pathlib import Path
 from typing import Optional
+import warnings
 
 import numpy as np
 import torch
 from torch.utils.data import DataLoader, Dataset
-
-
-class TensorBatchLoader:
-    """内存张量按 batch 切片；每个 epoch 只做一次 shuffle。"""
-
-    def __init__(self, obs, actions, batch_size, shuffle=False, drop_last=False):
-        self.obs = obs
-        self.actions = actions
-        self.batch_size = int(batch_size)
-        self.shuffle = bool(shuffle)
-        self.drop_last = bool(drop_last)
-
-    def __len__(self):
-        n = self.obs.shape[0]
-        return n // self.batch_size if self.drop_last else (n + self.batch_size - 1) // self.batch_size
-
-    def __iter__(self):
-        n = self.obs.shape[0]
-        if self.shuffle:
-            perm = torch.randperm(n, device=self.obs.device)
-            obs, actions = self.obs[perm], self.actions[perm]
-        else:
-            obs, actions = self.obs, self.actions
-        end = (n // self.batch_size) * self.batch_size if self.drop_last else n
-        for i in range(0, end, self.batch_size):
-            yield obs[i:i + self.batch_size], actions[i:i + self.batch_size]
 
 
 class BaseBuffer:
@@ -40,14 +15,6 @@ class BaseBuffer:
         self._idx = 0
         self._size = 0
         self._arrays: Optional[dict] = None
-
-    def _initialize(self, values):
-        self._arrays = {
-            key: np.zeros((self.capacity,) + value.shape[1:], dtype=np.float32)
-            for key, value in values.items()
-        }
-        for key, array in self._arrays.items():
-            setattr(self, key, array)
 
     def add_batch(self, **extra):
         values = {key: np.asarray(value, dtype=np.float32) for key, value in extra.items()}
@@ -60,7 +27,12 @@ class BaseBuffer:
         if n == 0:
             return
         if self._arrays is None:
-            self._initialize(values)
+            self._arrays = {
+                key: np.zeros((self.capacity,) + value.shape[1:], dtype=np.float32)
+                for key, value in values.items()
+            }
+            for key, array in self._arrays.items():
+                setattr(self, key, array)
 
         start = max(0, n - self.capacity)
         indices = (self._idx + np.arange(start, n)) % self.capacity
@@ -311,31 +283,104 @@ class ExpertDataManager:
         self._raw_obs = None
         self._raw_actions = np.array([])
         self._raw_dones = np.array([])
+        self._absorbing_state = False
 
-    def load_data(self, data_path, raw_obs_dim=None):
+    def load_data(self, data_path, raw_obs_dim=None, absorbing_state=False,
+                  obs_normalizer=None):
+        """先变换物理观测，再追加 absorbing bit / 自环，不更新统计量。"""
         with np.load(Path(data_path), allow_pickle=False) as data:
             raw_obs = np.asarray(data["states"], dtype=np.float32)
             raw_actions = np.asarray(data["actions"], dtype=np.float32)
             dones = np.asarray(data["dones"], dtype=np.float32).reshape(-1)
+            terminated = truncated = None
+            if absorbing_state:
+                for key in ("terminated", "terminateds"):
+                    if key in data:
+                        terminated = np.asarray(data[key], dtype=bool).reshape(-1)
+                        break
+                for key in ("truncated", "truncations", "timeouts"):
+                    if key in data:
+                        mask = np.asarray(data[key], dtype=bool).reshape(-1)
+                        if len(mask) != len(dones):
+                            raise ValueError(f"专家 {key} 与 dones 长度不匹配")
+                        truncated = mask if truncated is None else truncated | mask
         if raw_obs_dim is not None and raw_obs.shape[1] != int(raw_obs_dim):
             raise ValueError(f"states 维度不匹配：期望 {raw_obs_dim}，实际 {raw_obs.shape[1]}")
+        if len(raw_obs) != len(raw_actions) or len(raw_obs) != len(dones):
+            raise ValueError("专家 states / actions / dones 长度不匹配")
+        if obs_normalizer is not None:
+            raw_obs = np.asarray(obs_normalizer.normalize(raw_obs), dtype=np.float32)
+
+        if absorbing_state:
+            if terminated is not None:
+                if len(terminated) != len(dones):
+                    raise ValueError("专家 terminated 与 dones 长度不匹配")
+                terminal_mask = terminated
+            elif truncated is not None:
+                terminal_mask = dones.astype(bool) & ~truncated
+            else:
+                warnings.warn(
+                    "专家数据缺少 terminated/truncated metadata；"
+                    "absorbing_state 将 legacy dones 视为真正 terminal（成功专家假设）。",
+                    UserWarning, stacklevel=2,
+                )
+                terminal_mask = dones.astype(bool)
+
+            boundaries = dones.astype(bool) | terminal_mask
+            if truncated is not None:
+                boundaries |= truncated
+            raw_obs = np.concatenate([
+                raw_obs, np.zeros((len(raw_obs), 1), dtype=np.float32),
+            ], axis=-1)
+            repeats = 1 + terminal_mask.astype(np.int64)
+            loops = np.cumsum(repeats)[terminal_mask] - 1
+            raw_obs = np.repeat(raw_obs, repeats, axis=0)
+            raw_actions = np.repeat(raw_actions, repeats, axis=0)
+            dones = np.repeat(boundaries.astype(np.float32), repeats)
+            raw_obs[loops]     = 0
+            raw_obs[loops, -1] = 1
+            raw_actions[loops] = 0
+            # ExpertBuffer 的 dones 表示序列边界；终止帧与自环归属同一回合。
+            dones[loops - 1] = 0
+            dones[loops] = 1
 
         self.buffer = ExpertBuffer(max(self.buffer.capacity, len(raw_obs)))
         self._raw_obs = raw_obs
         self._raw_actions = raw_actions
         self._raw_dones = dones
+        self._absorbing_state = bool(absorbing_state)
         self.buffer.add_batch(raw_obs, raw_actions, dones)
 
     def trans_dataloader(self, split, batch_size, device=None, seed=0, *,
                          horizon=16, n_obs_steps=2, n_action_steps=8,
                          pad_before=None, pad_after=None,
-                         num_workers=0, drop_last=False):
+                         num_workers=0, drop_last=False, obs_normalizer=None):
+        """可选仅用训练回合拟合统计，再归一化全量数据并创建序列快照。"""
         episode_ends = _episode_ends(self._raw_dones)
         rng = np.random.default_rng(seed)
         order = rng.permutation(len(episode_ends))
         train_count = max(1, int(round(float(split) * len(episode_ends))))
         train_mask = np.zeros(len(episode_ends), dtype=bool)
         train_mask[order[:train_count]] = True
+
+        if obs_normalizer is not None:
+            episode_lengths = np.diff(np.concatenate([[0], episode_ends]))
+            train_frames = np.repeat(train_mask, episode_lengths)
+            physical_obs = self._raw_obs
+            if self._absorbing_state:
+                train_frames &= physical_obs[:, -1] == 0
+                physical_obs = physical_obs[:, :-1]
+            obs_normalizer.update(physical_obs[train_frames])
+            if self._absorbing_state:
+                observations = self._raw_obs.copy()
+                normal_mask = observations[:, -1] == 0
+                observations[normal_mask, :-1] = obs_normalizer.normalize(physical_obs[normal_mask])
+                observations[~normal_mask, :-1] = 0
+            else:
+                observations = obs_normalizer.normalize(physical_obs)
+            self._raw_obs = np.asarray(observations, dtype=np.float32)
+            self.buffer.clear()
+            self.buffer.add_batch(self._raw_obs, self._raw_actions, self._raw_dones)
 
         if pad_before is None:
             pad_before = n_obs_steps - 1

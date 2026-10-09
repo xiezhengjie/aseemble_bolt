@@ -1,6 +1,9 @@
 env:
-  num_envs: 8
+  num_envs: 4
   max_episode_steps: 400
+  absorbing_state: true      # 每个 terminal 向同一 replay 加一条吸收态自环。
+
+# 环境与专家均使用 base_policy checkpoint 的冻结观测统计。
 
 trainer:
   _target_: training.common.train_utils.ResidualGAILTrainer
@@ -8,9 +11,9 @@ trainer:
   total_timesteps: 2000000
   learning_starts: 5000     # 前 5000 步只用基座动作采集（基座预热），期间不做更新
   use_warmup: true          # 启用基座预热阶段；false 表示残差策略从第 0 步直接参与
-  batch_size: 256
-  policy_updates: 1
-  target_update_interval: 1
+  batch_size: 128
+  policy_updates: 2
+  target_update_interval: 2
   eval_interval: 10000
   eval_episodes: 30
   final_eval_episodes: 30
@@ -36,7 +39,7 @@ training:
   eval_num_envs: 8
   eval_seed: 200000
   buffer_size: 1000000       # buffers.replay.capacity 用
-  generator_window: 50000    # buffers.generator.window_size 用
+  generator_window: 500000   # buffers.generator.window_size 用
 
 base_policy:
   _target_: training.policy.diffusion_policy.DiffusionPolicy
@@ -109,14 +112,14 @@ policy:
   tau: 0.005
   alpha: 0.2
   alpha_min: 0.02
-  target_entropy: -6.0
+  target_entropy: -3.0
   log_std_init: -3.0
   autotune: true
   use_sde: true
 
 discriminator:
   _target_: training.policy.discriminator_policy.Discriminator
-  hidden_dim: [64, 64]
+  hidden_dim: [64]
 
   optimizer:
     lr: 1e-4
@@ -129,9 +132,15 @@ discriminator:
     num_warmup_steps: 20000
 
   smoothing: 0.05
-  dropout: 0.1
+  dropout_in: 0.2
+  dropout: 0.5
   ent_reg_scale: 0.001
   grad_clip_norm: 5.0
+  weight_init: true
+  last_layer_scale: 0.1
+  gradient_penalty: false    # 判别器梯度惩罚，默认关闭。
+  gradient_penalty_lambda: 1.0  # 梯度惩罚权重。
+  gradient_penalty_k: 0.0    # 梯度范数目标。
 
 buffers:
   expert:

@@ -14,12 +14,12 @@ import hydra
 import torch
 import wandb
 import logging
-import numpy as np
 from gymnasium.vector import AutoresetMode
 from omegaconf import DictConfig, OmegaConf
 from training.common.buffer_utils import ExpertDataManager
 from training.common.eval_utils import BaseChunkPolicyEvaluator
-from training.common.rl_utils import make_env, set_seed
+from training.common.observation_wrapper import ObsNormalizeVectorWrapper
+from training.common.rl_utils import RunningMeanStd, make_env, set_seed
 from training.common.train_utils import SupervisedPolicyTrainer
 from training.policy.diffusion_policy import DiffusionPolicy
 
@@ -53,6 +53,7 @@ def main(cfg: DictConfig):
         # 数据加载
         manager = ExpertDataManager()
         manager.load_data(DATA_PATH, raw_obs_dim=cfg.policy.obs_dim)
+        normalizer = RunningMeanStd(shape=(cfg.policy.obs_dim,))
         train_loader, val_loader = manager.trans_dataloader(
             split=cfg.training.split,
             batch_size=int(cfg.training.batch_size),
@@ -62,19 +63,12 @@ def main(cfg: DictConfig):
             n_obs_steps=int(cfg.policy.n_obs_steps),
             n_action_steps=int(cfg.policy.n_action_steps),
             num_workers=int(cfg.training.num_workers),
+            obs_normalizer=normalizer,
         )
 
         # 策略创建
         num_training_steps = len(train_loader)*int(cfg.training.epochs)
         policy: DiffusionPolicy =  hydra.utils.instantiate(cfg.policy, num_training_steps=num_training_steps).to(device)
-
-        # 观察归一化
-        sampler = train_loader.dataset.sampler
-        data = sampler.replay_buffer
-        train_frames = np.zeros(len(data['obs']), dtype=bool)
-        for start, end, _, _ in sampler.indices:
-            train_frames[start:end] = True
-        policy.fit_obs_normalizer(data['obs'][train_frames])
 
         # 训练
         trainer = SupervisedPolicyTrainer(
@@ -85,6 +79,7 @@ def main(cfg: DictConfig):
             model_dir=MODE_DIR,
             patience=int(cfg.training.patience),
             wb_run=wb_run,
+            obs_normalizer=normalizer,
         )
         trainer.train()
 
@@ -100,6 +95,9 @@ def main(cfg: DictConfig):
             [make_env(str(XML_PATH), str(URDF_PATH), 400)
              for _ in range(eval_num_envs)],
             autoreset_mode=AutoresetMode.SAME_STEP,
+        )
+        env = ObsNormalizeVectorWrapper(
+            env, normalizer=ObsNormalizeVectorWrapper.load_normalizer(MODE_DIR), update_stats=False,
         )
         stack.callback(env.close)
         evaluator = BaseChunkPolicyEvaluator(

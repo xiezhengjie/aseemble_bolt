@@ -19,7 +19,8 @@ import gymnasium as gym
 from gymnasium.vector import AutoresetMode
 from omegaconf import DictConfig, OmegaConf
 from training.policy.sac_policy import SACPolicy
-from training.common.rl_utils import make_env, set_seed
+from training.common.rl_utils import make_env, set_seed, RunningMeanStd
+from training.common.observation_wrapper import ObsNormalizeVectorWrapper
 from training.common.train_utils import OffPolicyTrainer
 
 OmegaConf.register_new_resolver("eval", eval, replace=True)
@@ -56,6 +57,14 @@ def main(cfg: DictConfig):
             [make_env(str(XML_PATH), str(URDF_PATH), max_episode_steps) for _ in range(n_envs)],
             autoreset_mode=AutoresetMode.SAME_STEP,
         )
+        norm_cfg = cfg.observation_normalization
+        obs_normalizer = (
+            RunningMeanStd(shape=env.single_observation_space.shape, clip=float(norm_cfg.clip))
+            if norm_cfg.enabled else None
+        )
+        env = ObsNormalizeVectorWrapper(
+            env, normalizer=obs_normalizer, update_stats=bool(norm_cfg.update_stats),
+        )
         stack.callback(env.close)
         eval_episodes = max(
             int(cfg.trainer.eval_episodes), int(cfg.trainer.final_eval_episodes),
@@ -68,6 +77,9 @@ def main(cfg: DictConfig):
             [make_env(str(XML_PATH), str(URDF_PATH), max_episode_steps)
              for _ in range(eval_num_envs)],
             autoreset_mode=AutoresetMode.SAME_STEP,
+        )
+        eval_env = ObsNormalizeVectorWrapper(
+            eval_env, normalizer=obs_normalizer,
         )
         stack.callback(eval_env.close)
         env.single_action_space.seed(seed)
@@ -99,6 +111,7 @@ def main(cfg: DictConfig):
             replay_buffer=hydra.utils.instantiate(cfg.buffers.replay),
             wb_run=wb_run,
             save_model_dir=MODE_DIR,
+            obs_normalizer=obs_normalizer,
             eval_seed=int(cfg.training.eval_seed),
             eval_env_seed=int(cfg.training.eval_env_seed),
         )
@@ -111,6 +124,7 @@ def main(cfg: DictConfig):
         set_seed(eval_seed)
         if trainer.is_save_model:
             agent.load_model(MODE_DIR / "final_model")
+            eval_env.normalizer = ObsNormalizeVectorWrapper.load_normalizer(MODE_DIR / "final_model", obs_normalizer)
         metrics = trainer.evaluator.evaluate(
             eval_env,
             n_episodes=trainer.final_eval_episodes,

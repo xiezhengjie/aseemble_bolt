@@ -12,6 +12,7 @@ from collections import deque
 from gymnasium.vector import AutoresetMode
 from training.common.eval_utils import Evaluator, ResidualEvaluator
 from training.common.rl_utils import RewardNormalizer, set_seed
+from training.common.observation_wrapper import ObsNormalizeWrapper
 
 _EPISODE_INFO_KEYS = ("depth", "position_error_xy", "yaw_error", "angle_z")
 
@@ -26,13 +27,14 @@ class DataCollector:
       - extra 会展开进 add_batch（如 base_actions / res_actions）
     """
 
-    def __init__(self, env, agent, replay_buffer):
+    def __init__(self, env, agent, replay_buffer, absorbing_state=False):
         if env.autoreset_mode != AutoresetMode.SAME_STEP:
             raise ValueError("训练环境必须使用 autoreset_mode=AutoresetMode.SAME_STEP")
         self.env = env
         self.agent = agent
         self.replay_buffer = replay_buffer
         self.n_envs = env.num_envs
+        self.absorbing_state = bool(absorbing_state)
         self.transition_callback = None
 
     def reset(self, seed, options=None):
@@ -52,10 +54,17 @@ class DataCollector:
 
     def step(self, warmup: bool = False) -> list[dict]:
         actions, extra = self._action(warmup)
-        next_obs, rewards, terminated, truncated, infos = self.env.step(actions)
+        (
+            next_obs,
+            rewards,
+            terminated,
+            truncated,
+            infos,
+        ) = self.env.step(actions)
+
         next_obs = np.asarray(next_obs, dtype=np.float32)
-        rewards = np.asarray(rewards, dtype=np.float32)
-        ended = terminated | truncated
+        rewards  = np.asarray(rewards, dtype=np.float32)
+        ended    = terminated | truncated
 
         # SAME_STEP 下 next_obs 是重置后的首帧，TD target 必须使用 final_obs。
         td_next_obs = next_obs.copy()
@@ -85,11 +94,34 @@ class DataCollector:
             self.transition_callback(self.obs, actions)
 
         extra = self._transition_extra(next_obs, td_next_obs, terminated, ended, extra)
-        self.replay_buffer.add_batch(
+        dones = np.asarray(terminated, dtype=np.float32)
+        values = dict(
             obs=self.obs, actions=actions, next_obs=td_next_obs,
-            rewards=rewards, dones=terminated, successes=successes,
-            **extra,
+            rewards=rewards, dones=dones, successes=successes, **extra,
         )
+        terminal_indices = np.flatnonzero(terminated)
+        if self.absorbing_state and terminal_indices.size:
+            absorbing_obs        = np.zeros_like(td_next_obs[terminal_indices], dtype=np.float32)
+            absorbing_obs[:, -1] = 1
+            values["next_obs"][terminal_indices] = absorbing_obs
+            values["dones"][terminal_indices]    = 0
+
+            # 每条真实终止后紧邻插入一条吸收态自环，整批一次写入回放池。
+            repeats = np.ones(self.n_envs, dtype=np.int64)
+            repeats[terminal_indices] = 2
+            loop_indices = np.cumsum(repeats)[terminal_indices] - 1
+            values = {
+                key: np.repeat(np.asarray(value), repeats, axis=0)
+                for key, value in values.items()
+            }
+            for value in values.values():
+                value[loop_indices] = 0
+            values["obs"][loop_indices] = absorbing_obs
+            values["next_obs"][loop_indices] = absorbing_obs
+            if self.transition_callback is not None:
+                self.transition_callback(absorbing_obs, np.zeros_like(actions[terminal_indices]))
+
+        self.replay_buffer.add_batch(**values)
         self.obs = next_obs.copy()
         return episodes
 
@@ -100,8 +132,9 @@ class ResidualDataCollector(DataCollector):
     def __init__(
         self, env, base_agent, res_agent, replay_buffer,
         residual_scale, obs_horizon, action_interval, sampling_steps,
+        absorbing_state=False,
     ):
-        super().__init__(env, res_agent, replay_buffer)
+        super().__init__(env, res_agent, replay_buffer, absorbing_state=absorbing_state)
         self.base_agent = base_agent
         self.residual_scale = float(residual_scale)
         self.obs_horizon = int(obs_horizon)
@@ -116,7 +149,9 @@ class ResidualDataCollector(DataCollector):
 
     def reset(self, seed, options=None):
         super().reset(seed, options)
-        self.history = np.repeat(self.obs[:, None, :], self.obs_horizon, axis=1)
+        self.history = np.repeat(
+            self.obs[:, None, :self.base_agent.obs_dim], self.obs_horizon, axis=1,
+        )
         self.action_plans = None
         self.plan_indices = np.zeros(self.n_envs, dtype=np.int64)
         self.prev_naction = None
@@ -140,7 +175,7 @@ class ResidualDataCollector(DataCollector):
 
     def _transition_extra(self, next_obs, td_next_obs, terminated, ended, extra):
         self.history = np.concatenate(
-            [self.history[:, 1:], td_next_obs[:, None, :]], axis=1,
+            [self.history[:, 1:], td_next_obs[:, None, :self.base_agent.obs_dim]], axis=1,
         )
         self.plan_indices += 1
 
@@ -150,7 +185,7 @@ class ResidualDataCollector(DataCollector):
             next_base_actions[indices] = self._plan_base_actions(indices)
 
         # timeout 仍从旧回合终帧 bootstrap；实际执行从新回合重新规划。
-        self.history[ended] = next_obs[ended, None, :]
+        self.history[ended] = next_obs[ended, None, :self.base_agent.obs_dim]
         self.plan_indices[ended] = self.action_interval
         if self.prev_naction is not None:
             self.prev_naction[ended] = 0
@@ -208,7 +243,7 @@ class SupervisedPolicyTrainer:
     def __init__(
         self, agent, train_loader, val_loader, total_epochs,
         model_dir, patience=100, min_delta=1e-6,
-        wb_run=None, is_early_stop=True,
+        wb_run=None, is_early_stop=True, obs_normalizer=None,
     ):
         self.agent = agent
         self.train_loader = train_loader
@@ -219,6 +254,7 @@ class SupervisedPolicyTrainer:
         self.min_delta = float(min_delta)
         self.is_early_stop = bool(is_early_stop)
         self.wb_run = wb_run
+        self.obs_normalizer = obs_normalizer
 
     def train(self):
         """独立窗口随机组 batch，按验证 MSE 保存最佳模型并早停。"""
@@ -236,6 +272,7 @@ class SupervisedPolicyTrainer:
                         best_val = val_loss
                         patience_count = 0
                         self.agent.save_model(self.model_dir)
+                        ObsNormalizeWrapper.save_normalizer(self.obs_normalizer, self.model_dir)
                     else:
                         patience_count += 1
                     progress.set_postfix(
@@ -271,9 +308,11 @@ class OffPolicyTrainer:
         is_draw=True, log_interval=100, wb_run=None,
         use_warmup=True, reset_options=None, policy_updates=1,
         target_update_interval=1, eval_seed=None, eval_env_seed=None,
+        absorbing_state=False, obs_normalizer=None,
     ):
         self.env = env
         self.eval_env = eval_env
+        self.obs_normalizer = obs_normalizer
         self.agent = agent
         self.replay_buffer = replay_buffer
         self.total_timesteps = int(total_timesteps)
@@ -293,7 +332,9 @@ class OffPolicyTrainer:
         self.use_warmup = use_warmup
         self.reset_options = reset_options
 
-        self.collector = collector or self.collector_class(env, agent, replay_buffer)
+        self.collector = collector or self.collector_class(
+            env, agent, replay_buffer, absorbing_state=absorbing_state,
+        )
         self.evaluator = evaluator or Evaluator(agent)
 
         self.global_step = 0
@@ -331,6 +372,7 @@ class OffPolicyTrainer:
                     step_started = time.perf_counter()
                     warmup = self.global_step < self.learning_starts and self.use_warmup
                     episodes = self.collector.step(warmup=warmup)
+                    # 吸收态自环不计入真实环境步数。
                     self.global_step += self.env.num_envs
 
                     should_log = self.global_step >= next_log
@@ -459,6 +501,7 @@ class OffPolicyTrainer:
         path = self.save_model_dir / name
         path.mkdir(parents=True, exist_ok=True)
         self.agent.save_model(path)
+        ObsNormalizeWrapper.save_normalizer(self.obs_normalizer, path)
         info = {
             "global_step": self.global_step,
             "episode": len(self.return_list),
@@ -492,7 +535,7 @@ class GAILTrainer(OffPolicyTrainer):
         self, *args, discriminator, expert_buffer, generator_buffer,
         disc_updates=2, disc_batch_size=256, env_reward_weight=0.0,
         gail_reward_coef=1.0, gail_reward_scale=True, gail_reward_clip=5.0,
-        gamma=0.99, success_reward=100.0, **kwargs,
+        success_reward=100.0, **kwargs,
     ):
         super().__init__(*args, **kwargs)
         self.discriminator = discriminator
@@ -524,6 +567,7 @@ class GAILTrainer(OffPolicyTrainer):
 
     def _prepare_batch(self, batch: dict) -> dict:
         batch = super()._prepare_batch(batch)
+        # 自环的环境奖励为零，仍由 GAIL 重算 learned reward。
         reward = self.discriminator.predict_rewards(
             self._discriminator_states(batch["states"]),
             batch["actions"], to_numpy=True,
@@ -582,12 +626,13 @@ class ResidualGAILTrainer(GAILTrainer):
         self, env, eval_env, base_agent, res_agent, replay_buffer,
         total_timesteps, learning_starts=1000, batch_size=256, *,
         residual_scale, obs_horizon, action_interval, sampling_steps,
-        use_warmup=False, evaluator=None, **kwargs,
+        use_warmup=False, evaluator=None, absorbing_state=False, **kwargs,
     ):
 
         collector = self.collector_class(
             env, base_agent, res_agent, replay_buffer, residual_scale,
             obs_horizon, action_interval, sampling_steps,
+            absorbing_state=absorbing_state,
         )
         if evaluator is None:
             evaluator = ResidualEvaluator(
@@ -599,7 +644,7 @@ class ResidualGAILTrainer(GAILTrainer):
             env, eval_env, res_agent, replay_buffer, total_timesteps,
             learning_starts, batch_size,
             collector=collector, evaluator=evaluator,
-            use_warmup=use_warmup, **kwargs,
+            use_warmup=use_warmup, absorbing_state=absorbing_state, **kwargs,
         )
 
     def _discriminator_states(self, states: np.ndarray) -> np.ndarray:

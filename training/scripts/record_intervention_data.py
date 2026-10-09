@@ -40,6 +40,7 @@ from training.model.base.basic_model import load_base_policy
 from training.envs.assemble_mujoco_env import AssembleMuJoCoEnv
 from training.common import rl_utils
 from training.common.checkpoint import has_weight, load_policy_cfg, load_state_dict
+from training.common.observation_wrapper import ObsNormalizeWrapper
 
 
 class InterventionRecorder:
@@ -124,8 +125,15 @@ class InterventionRecorder:
             admittance_force_deadzone=0.1,
             admittance_torque_deadzone=0.005,
         )
+        normalizer = ObsNormalizeWrapper.load_normalizer(base_model_dir)
+        normalizer_path = base_model_dir / "obs_normalizer.npz"
+        if normalizer is None and bool(base_cfg.get("obs_normalized", False)) and normalizer_path.exists():
+            raw_obs_dim = int(base_cfg.get("raw_obs_dim") or 10)
+            normalizer = rl_utils.RunningMeanStd(shape=(raw_obs_dim,))
+            normalizer.load_normalizer(base_model_dir)
         self.env = rl_utils.wrap_frame_stack(
-            self.base_env, self.frame_stack, padding_type="reset"
+            ObsNormalizeWrapper(self.base_env, normalizer=normalizer),
+            self.frame_stack, padding_type="reset",
         )
 
         self.device = self._resolve_device(device)
@@ -136,12 +144,6 @@ class InterventionRecorder:
         self.base_policy.eval()
         for parameter in self.base_policy.parameters():
             parameter.requires_grad_(False)
-        self.obs_normalizer = None
-        normalizer_path = base_model_dir / "obs_normalizer.npz"
-        if bool(base_cfg.get("obs_normalized", False)) and normalizer_path.exists():
-            raw_obs_dim = int(base_cfg.get("raw_obs_dim") or 10)
-            self.obs_normalizer = rl_utils.RunningMeanStd(shape=(raw_obs_dim,))
-            self.obs_normalizer.load_normalizer(base_model_dir)
         self.action_zero = np.zeros(
             int(base_cfg.get("action_dim", self.env.action_space.shape[0])),
             dtype=np.float32,
@@ -282,11 +284,7 @@ class InterventionRecorder:
             self._exit_requested = True
 
     def _bc_action(self, stacked_obs: np.ndarray) -> np.ndarray:
-        policy_obs = (
-            self.obs_normalizer.normalize(np.asarray(stacked_obs, dtype=np.float32))
-            if self.obs_normalizer is not None
-            else np.asarray(stacked_obs, dtype=np.float32)
-        )
+        policy_obs = np.asarray(stacked_obs, dtype=np.float32)
         with torch.no_grad():
             state = torch.as_tensor(
                 policy_obs[None], dtype=torch.float32, device=self.device
