@@ -27,7 +27,7 @@ trainer:
   obs_horizon: ${base_policy.n_obs_steps}
   action_interval: ${base_policy.n_action_steps}
   sampling_steps: ${base_policy.num_inference_steps}
-  gail_reward_scale: true
+  gail_reward_scale: false
   is_save_model: true
 
 training:

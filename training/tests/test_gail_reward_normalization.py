@@ -197,6 +197,38 @@ class GAILCollectionNormalizationTest(unittest.TestCase):
                 expected = trainer.reward_normalizer.normalize(raw) if enabled else raw
                 np.testing.assert_allclose(result["rewards"].ravel(), 2 * expected + [11, 2])
 
+    def test_logs_only_gail_reward_mean_from_last_policy_batch(self):
+        for residual in (False, True):
+            for enabled in (False, True):
+                with self.subTest(residual=residual, enabled=enabled):
+                    trainer = self.make_trainer(
+                        residual=residual, enabled=enabled, policy_updates=3,
+                    )
+                    trainer.collector.reset(seed=1)
+                    trainer.collector.step(warmup=False)
+                    trainer.agent.update.side_effect = lambda *args, **kwargs: {}
+                    trainer.discriminator.predict_rewards.side_effect = [
+                        np.array([1.0, 2.0]),
+                        np.array([2.0, 3.0]),
+                        np.array([3.0, 4.0]),
+                    ]
+                    info = trainer._update(log_info=True)
+                    raw = np.array([3.0, 4.0])
+                    expected = trainer.reward_normalizer.normalize(raw) if enabled else raw
+                    self.assertAlmostEqual(info["gail_reward_mean"], float(np.mean(2 * expected)))
+                    batch = trainer.agent.update.call_args.args[0]
+                    self.assertFalse(np.isclose(info["gail_reward_mean"], batch["rewards"].mean()))
+                    self.assertEqual(trainer.discriminator.predict_rewards.call_count, 3 + int(enabled))
+                    trainer.wb_run = Mock()
+                    logged = []
+                    trainer.wb_run.log.side_effect = lambda values, step: logged.append(dict(values))
+                    trainer._log({f"losses/{key}": value for key, value in info.items()})
+                    trainer._flush_logs()
+                    self.assertEqual(logged[0]["losses/gail_reward_mean"], info["gail_reward_mean"])
+                    trainer.discriminator.predict_rewards.side_effect = None
+                    trainer.discriminator.predict_rewards.return_value = raw
+                    self.assertNotIn("gail_reward_mean", trainer._update(log_info=False))
+
     def test_training_updates_statistics_during_warmup(self):
         trainer = self.make_trainer(policy_updates=3)
         trainer.learning_starts = 2

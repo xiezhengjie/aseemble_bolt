@@ -509,6 +509,7 @@ class GAILTrainer(OffPolicyTrainer):
             self.collector.transition_callback = self._update_reward_stats
         self.success_reward = float(success_reward)
         self.disc_losses: list[float] = []
+        self._last_gail_reward_mean: float | None = None
 
     def _update_reward_stats(self, states, actions):
         if self.reward_normalizer is None:
@@ -530,8 +531,10 @@ class GAILTrainer(OffPolicyTrainer):
         if self.reward_normalizer is not None:
             reward = self.reward_normalizer.normalize(reward)
 
+        gail_reward = self.gail_reward_coef * reward
+        self._last_gail_reward_mean = float(np.mean(gail_reward))
         batch["rewards"] = (
-            self.gail_reward_coef * reward
+            gail_reward
             + self.env_reward_weight * batch["rewards"].reshape(-1, 1)
             + self.success_reward * batch["successes"].reshape(-1, 1)
         )
@@ -539,7 +542,10 @@ class GAILTrainer(OffPolicyTrainer):
 
     def _update(self, log_info: bool) -> dict:
         # 判别器在全部策略更新完成后才更新。
+        self._last_gail_reward_mean = None
         info = super()._update(log_info)
+        if log_info and self._last_gail_reward_mean is not None:
+            info["gail_reward_mean"] = self._last_gail_reward_mean
 
         disc_info: dict = {}
         for index in range(self.disc_updates):
